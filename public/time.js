@@ -67,20 +67,13 @@ export function phraseFor(date, { includePeriod = true } = {}) {
   const hours = date.getHours();
   const minutes = date.getMinutes();
   const hour = HOURS[hours % 12];
-  const upcoming = HOURS[(hours + 1) % 12];
-
-  let body;
-  if (hours === 0 && minutes === 0) body = "midnight";
-  else if (hours === 12 && minutes === 0) body = "noon";
-  else if (minutes === 0) body = `${hour} o'clock`;
-  else if (minutes === 15) body = `quarter past ${hour}`;
-  else if (minutes === 30) body = `half past ${hour}`;
-  else if (minutes === 45) body = `quarter to ${upcoming}`;
-  else if (minutes < 10) body = `${hour} oh ${SMALL[minutes]}`;
-  else body = `${hour} ${minuteWords(minutes)}`;
-
-  const named = body === "midnight" || body === "noon";
-  const period = includePeriod && !named ? ` ${dayPart(hours)}` : "";
+  const body =
+    minutes === 0
+      ? `${hour} o'clock`
+      : minutes < 10
+        ? `${hour} oh ${SMALL[minutes]}`
+        : `${hour} ${minuteWords(minutes)}`;
+  const period = includePeriod ? ` ${dayPart(hours)}` : "";
   return `It's ${body}${period}.`;
 }
 

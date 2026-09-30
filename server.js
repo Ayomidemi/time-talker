@@ -110,6 +110,7 @@ let nextAt = null;
 let sayProcess = null;
 let generation = 0;
 let timer = null;
+let announcedSlot = "";
 
 function statePayload() {
   return {
@@ -182,6 +183,10 @@ async function announce(text) {
   }
 }
 
+function slotId(date) {
+  return [date.getFullYear(), date.getMonth(), date.getDate(), date.getHours(), date.getMinutes()].join("-");
+}
+
 function arm() {
   clearTimeout(timer);
   const target = nextHalfHour(new Date());
@@ -189,9 +194,15 @@ function arm() {
   const delay = Math.max(0, target.getTime() - Date.now());
   const when = target.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   console.log(`Next announcement at ${when}${settings.enabled ? "" : " (paused)"}`);
-  timer = setTimeout(async () => {
+  const chime = async () => {
     const late = Date.now() - target.getTime();
-    if (settings.enabled && late < LATE_LIMIT_MS) {
+    if (late < -250) {
+      timer = setTimeout(chime, -late);
+      return;
+    }
+    const slot = slotId(target);
+    if (settings.enabled && late < LATE_LIMIT_MS && announcedSlot !== slot) {
+      announcedSlot = slot;
       const text = phraseFor(target, settings);
       console.log(`Announcing: ${text}`);
       try {
@@ -203,7 +214,8 @@ function arm() {
       console.log(`Skipped a late chime (${Math.round(late / 1000)}s late).`);
     }
     arm();
-  }, delay);
+  };
+  timer = setTimeout(chime, delay);
 }
 
 function watchClock() {
