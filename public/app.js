@@ -33,6 +33,7 @@ let state = {
   lastError: null,
 };
 let pendingSpeak = false;
+let speakRequest = 0;
 let heardAt = null;
 
 progressEl.style.strokeDasharray = String(CIRCUMFERENCE);
@@ -145,8 +146,34 @@ async function save(partial) {
     }
     state = body;
     syncControls();
+    return true;
   } catch {
     setError("Couldn’t save that. Is Time Talker still running?");
+    return false;
+  }
+}
+
+async function speakNow() {
+  const request = ++speakRequest;
+  pendingSpeak = true;
+  state = {
+    ...state,
+    lastPhrase: phraseFor(new Date(), { includePeriod: state.includePeriod }),
+  };
+  syncControls();
+  try {
+    const response = await fetch("/api/speak", { method: "POST" });
+    const body = await response.json();
+    if (request !== speakRequest) return;
+    state = body;
+    if (!response.ok) setError(body.lastError || "Couldn’t speak just now.");
+  } catch {
+    if (request === speakRequest) setError("Couldn’t speak just now.");
+  } finally {
+    if (request === speakRequest) {
+      pendingSpeak = false;
+      syncControls();
+    }
   }
 }
 
@@ -157,8 +184,11 @@ toggleEl.addEventListener("click", () => {
   save({ enabled });
 });
 
-voiceEl.addEventListener("change", () => {
-  save({ voice: voiceEl.value });
+voiceEl.addEventListener("change", async () => {
+  const voice = voiceEl.value;
+  if (!voice || voice === state.voice) return;
+  const saved = await save({ voice });
+  if (saved) speakNow();
 });
 
 periodEl.addEventListener("change", () => {
@@ -166,24 +196,8 @@ periodEl.addEventListener("change", () => {
   save({ includePeriod: periodEl.checked });
 });
 
-speakEl.addEventListener("click", async () => {
-  pendingSpeak = true;
-  state = {
-    ...state,
-    lastPhrase: phraseFor(new Date(), { includePeriod: state.includePeriod }),
-  };
-  syncControls();
-  try {
-    const response = await fetch("/api/speak", { method: "POST" });
-    const body = await response.json();
-    state = body;
-    if (!response.ok) setError(body.lastError || "Couldn’t speak just now.");
-  } catch {
-    setError("Couldn’t speak just now.");
-  } finally {
-    pendingSpeak = false;
-    syncControls();
-  }
+speakEl.addEventListener("click", () => {
+  speakNow();
 });
 
 const boot = Promise.all([fetch("/api/state"), fetch("/api/voices")])
