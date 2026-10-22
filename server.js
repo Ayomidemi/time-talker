@@ -3,7 +3,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { nextHalfHour, phraseFor } from "./public/time.js";
+import { nextAnnouncement, phraseFor } from "./public/time.js";
 
 const PORT = Number(process.env.PORT) || 4173;
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -15,6 +15,7 @@ const DEFAULTS = {
   enabled: true,
   voice: "",
   includePeriod: true,
+  interval: "half",
   rate: 175,
 };
 
@@ -117,6 +118,7 @@ function statePayload() {
     enabled: settings.enabled,
     voice: settings.voice,
     includePeriod: settings.includePeriod,
+    interval: settings.interval === "quarter" ? "quarter" : "half",
     rate: settings.rate,
     speaking,
     lastPhrase,
@@ -136,8 +138,13 @@ function ensureVoice() {
 }
 
 function applySettings(input) {
+  let reschedule = false;
   if (typeof input.enabled === "boolean") settings.enabled = input.enabled;
   if (typeof input.includePeriod === "boolean") settings.includePeriod = input.includePeriod;
+  if (input.interval === "half" || input.interval === "quarter") {
+    if (settings.interval !== input.interval) reschedule = true;
+    settings.interval = input.interval;
+  }
   if (typeof input.rate === "number" && Number.isFinite(input.rate)) {
     settings.rate = Math.min(220, Math.max(120, Math.round(input.rate)));
   }
@@ -145,6 +152,7 @@ function applySettings(input) {
     settings.voice = input.voice;
   }
   saveSettings();
+  if (reschedule) arm();
 }
 
 function runSay(text) {
@@ -189,7 +197,7 @@ function slotId(date) {
 
 function arm() {
   clearTimeout(timer);
-  const target = nextHalfHour(new Date());
+  const target = nextAnnouncement(new Date(), settings.interval);
   nextAt = target;
   const delay = Math.max(0, target.getTime() - Date.now());
   const when = target.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });

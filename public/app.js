@@ -2,8 +2,8 @@ import {
   formatClock,
   formatWait,
   formatWhen,
-  halfHourProgress,
-  nextHalfHour,
+  intervalProgress,
+  nextAnnouncement,
   phraseFor,
 } from "./time.js";
 
@@ -11,11 +11,14 @@ const hmEl = document.querySelector("#hm");
 const secEl = document.querySelector("#sec");
 const ampmEl = document.querySelector("#ampm");
 const progressEl = document.querySelector("#progress");
+const ledeEl = document.querySelector("#lede");
+const chimeHelpEl = document.querySelector("#chime-help");
 const untilEl = document.querySelector("#until");
 const phraseEl = document.querySelector("#phrase");
 const errorEl = document.querySelector("#error");
 const liveEl = document.querySelector("#live");
 const toggleEl = document.querySelector("#toggle");
+const intervalEl = document.querySelector("#interval");
 const voiceEl = document.querySelector("#voice");
 const periodEl = document.querySelector("#period");
 const speakEl = document.querySelector("#speak");
@@ -27,6 +30,7 @@ let state = {
   enabled: true,
   voice: "",
   includePeriod: true,
+  interval: "half",
   speaking: false,
   lastPhrase: null,
   lastSpokenAt: null,
@@ -83,7 +87,17 @@ function syncControls() {
   document.body.classList.toggle("is-paused", !state.enabled);
   document.body.classList.toggle("is-speaking", state.speaking || pendingSpeak);
   if (document.activeElement !== voiceEl && state.voice) voiceEl.value = state.voice;
+  if (document.activeElement !== intervalEl) {
+    intervalEl.value = state.interval === "quarter" ? "quarter" : "half";
+  }
   if (document.activeElement !== periodEl) periodEl.checked = state.includePeriod;
+  const quarter = state.interval === "quarter";
+  ledeEl.textContent = quarter
+    ? "Speaks the time every quarter hour."
+    : "Speaks the time on the hour and at half past.";
+  chimeHelpEl.textContent = quarter
+    ? "On at :00, :15, :30, and :45. Off, and it stays quiet."
+    : "On at :00 and :30. Off, and it stays quiet.";
   const busy = state.speaking || pendingSpeak;
   speakEl.disabled = busy;
   speakEl.textContent = busy ? "Speaking…" : "Say the time now";
@@ -97,10 +111,11 @@ function paint(now) {
   ampmEl.textContent = clock.ap;
   document.title = `${clock.hm} ${clock.ap} · Time Talker`;
 
-  const progress = halfHourProgress(now);
+  const interval = state.interval === "quarter" ? "quarter" : "half";
+  const progress = intervalProgress(now, interval);
   progressEl.style.strokeDashoffset = String(CIRCUMFERENCE * (1 - progress));
 
-  const next = nextHalfHour(now);
+  const next = nextAnnouncement(now, interval);
   const upcoming = phraseFor(next, { includePeriod: state.includePeriod });
   const busy = state.speaking || pendingSpeak;
 
@@ -182,6 +197,12 @@ toggleEl.addEventListener("click", () => {
   state = { ...state, enabled };
   syncControls();
   save({ enabled });
+});
+
+intervalEl.addEventListener("change", () => {
+  const interval = intervalEl.value === "quarter" ? "quarter" : "half";
+  state = { ...state, interval };
+  save({ interval });
 });
 
 voiceEl.addEventListener("change", async () => {

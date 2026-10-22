@@ -1,6 +1,6 @@
 # Time Talker
 
-A clock that speaks the time on the hour and at half past. It uses the Mac `say` command, so announcements keep going after you close the browser tab. They stop when you quit the terminal.
+A clock that speaks the time on a schedule you choose: every half hour, or every quarter hour. It uses the Mac `say` command, so announcements keep going after you close the browser tab. They stop when you quit the terminal.
 
 ## Run
 
@@ -31,7 +31,8 @@ The time is read exactly, with the part of the day when that option is on.
 
 ## Controls
 
-- **Half-hour chime** turns announcements on or off.
+- **Chime** turns announcements on or off.
+- **How often** chooses every half hour (:00 and :30) or every quarter hour (:00, :15, :30, and :45).
 - **Voice** picks a macOS speaking voice.
 - **Say the time of day** adds “in the morning,” “in the afternoon,” “in the evening,” or “at night.”
 - **Say the time now** speaks the current minute immediately.

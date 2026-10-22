@@ -38,14 +38,18 @@ const SMALL = [
 
 const TENS = ["", "", "twenty", "thirty", "forty", "fifty"];
 
-export function nextHalfHour(from = new Date()) {
+export function intervalMinutes(interval) {
+  return interval === "quarter" ? 15 : 30;
+}
+
+export function nextAnnouncement(from = new Date(), interval = "half") {
+  const step = intervalMinutes(interval);
   const next = new Date(from.getTime());
   next.setSeconds(0, 0);
-  if (next.getMinutes() < 30) {
-    next.setMinutes(30);
-    return next;
-  }
-  next.setHours(next.getHours() + 1, 0, 0, 0);
+  const minutes = next.getMinutes();
+  const remainder = minutes % step;
+  const add = remainder === 0 ? step : step - remainder;
+  next.setMinutes(minutes + add, 0, 0);
   return next;
 }
 
@@ -77,12 +81,13 @@ export function phraseFor(date, { includePeriod = true } = {}) {
   return `It's ${body}${period}.`;
 }
 
-export function halfHourProgress(date = new Date()) {
+export function intervalProgress(date = new Date(), interval = "half") {
+  const step = intervalMinutes(interval);
   const elapsed =
-    (date.getMinutes() % 30) * 60 * 1000 +
+    (date.getMinutes() % step) * 60 * 1000 +
     date.getSeconds() * 1000 +
     date.getMilliseconds();
-  return elapsed / (30 * 60 * 1000);
+  return elapsed / (step * 60 * 1000);
 }
 
 export function formatClock(date) {

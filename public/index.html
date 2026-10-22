@@ -12,7 +12,7 @@
     <main>
       <header>
         <p class="brand">Time Talker</p>
-        <p class="lede">Speaks the time on the hour and at half past.</p>
+        <p class="lede" id="lede">Speaks the time on the hour and at half past.</p>
       </header>
 
       <section class="card" aria-label="Clock">
@@ -43,13 +43,21 @@
       <section class="panel" aria-label="Announcement settings">
         <div class="row">
           <div>
-            <p class="row-title">Half-hour chime</p>
-            <p class="row-help">On at :00 and :30. Off, and it stays quiet.</p>
+            <p class="row-title">Chime</p>
+            <p class="row-help" id="chime-help">On at :00 and :30. Off, and it stays quiet.</p>
           </div>
-          <button id="toggle" class="switch" type="button" role="switch" aria-checked="true" aria-label="Half-hour chime">
+          <button id="toggle" class="switch" type="button" role="switch" aria-checked="true" aria-label="Chime">
             <span class="knob"></span>
           </button>
         </div>
+
+        <label class="field">
+          <span>How often</span>
+          <select id="interval">
+            <option value="half">Every half hour</option>
+            <option value="quarter">Every quarter hour</option>
+          </select>
+        </label>
 
         <label class="field">
           <span>Voice</span>
