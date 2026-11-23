@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { writeIdentity } from "@/lib/account";
+import { holdSupabaseAnonKey, holdSupabaseUrl } from "@/lib/supabase/env";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
@@ -31,11 +32,9 @@ export async function POST(request: Request) {
 
   // Email accounts intentionally identify a profile without authenticating its owner.
   // They must never grant access to private Supabase Auth data.
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { persistSession: false, autoRefreshToken: false } },
-  );
+  const supabase = createClient(holdSupabaseUrl(), holdSupabaseAnonKey(), {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
   const { data, error } = await supabase.rpc("enter_email_account", {
     target_email: email,
     target_name: name || null,

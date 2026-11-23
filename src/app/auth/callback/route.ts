@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { PENDING_COOKIE } from "@/lib/cookies";
+import { holdSupabaseAnonKey, holdSupabaseUrl, isHoldSupabaseConfigured } from "@/lib/supabase/env";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -13,14 +14,14 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/login?auth=missing`);
   }
 
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  if (!isHoldSupabaseConfigured()) {
     return NextResponse.redirect(`${origin}/login?auth=unconfigured`);
   }
 
   const cookieStore = await cookies();
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    holdSupabaseUrl(),
+    holdSupabaseAnonKey(),
     {
       cookies: {
         getAll() {

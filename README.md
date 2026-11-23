@@ -31,7 +31,7 @@ Start with an optional email. Skip it to enter a name and use Hold locally. An e
 Email profiles are intentionally unverified, so anyone with an email can retrieve its saved name. They do not create a Supabase Auth session or grant access to private authenticated data. Settings and check-ins remain in this browser. Guest commitments stay local; email profiles save commitments in Supabase by email and day. With the chosen email-only entry, anyone who enters an email can access that profile and its commitments.
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. Put the project URL and anon key in `.env.local` (never put the database password in `NEXT_PUBLIC_*` vars).
+2. Put the project URL and anon key in `.env.local` as `NEXT_HOLD_SUPABASE_URL` and `NEXT_HOLD_SUPABASE_ANON_KEY` (never put the database password in these vars).
 3. For a new database, run `supabase/schema.sql` in the Supabase SQL editor. For an existing installation, run `supabase/migrations/20261123_email_accounts.sql` instead; it preserves names from previous Auth accounts.
 
 To apply the migration in the Supabase dashboard:
@@ -60,7 +60,7 @@ Manrope and Syne are bundled in `public/fonts` with their license, so builds do 
 1. Push this repo to GitHub.
 2. Import the project in Vercel.
 3. Framework preset: **Next.js**.
-4. Add the same `NEXT_PUBLIC_SUPABASE_*` env vars.
+4. Add the same `NEXT_HOLD_SUPABASE_*` env vars.
 5. Deploy.
 
 ## What v1 includes

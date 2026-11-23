@@ -2,12 +2,13 @@ import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { EMAIL_COOKIE } from "./cookies";
+import { holdSupabaseAnonKey, holdSupabaseUrl } from "@/lib/supabase/env";
 
 export async function emailAccountDatabase() {
   const email = (await cookies()).get(EMAIL_COOKIE)?.value?.trim().toLowerCase();
   if (!email) return { error: NextResponse.json({ error: "Enter your email to use saved account data." }, { status: 401 }) };
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = holdSupabaseUrl();
+  const key = holdSupabaseAnonKey();
   if (!url || !key) return { error: NextResponse.json({ error: "Account storage is unavailable." }, { status: 503 }) };
   // This app deliberately uses unverified email profiles, not Supabase Auth sessions.
   return { email, supabase: createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }) };
