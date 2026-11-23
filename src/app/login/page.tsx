@@ -2,10 +2,13 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { enterAccount } from "@/lib/account-client";
 import { saveProfile } from "@/lib/storage";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [step, setStep] = useState<"email" | "name">("email");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -13,46 +16,37 @@ export default function LoginPage() {
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     const nextEmail = email.trim().toLowerCase();
-    if (!nextEmail.includes("@")) {
-      setError("Enter a valid email.");
+    if (step === "email" && !nextEmail) {
+      setError(null);
+      setStep("name");
+      return;
+    }
+    if (step === "name" && !name.trim()) {
+      setError("Name is required.");
       return;
     }
 
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/auth/lookup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: nextEmail }),
+      const result = await enterAccount({
+        email: nextEmail,
+        ...(step === "name" ? { name: name.trim() } : {}),
       });
-      const body = (await response.json()) as {
-        exists?: boolean;
-        name?: string;
-        confirmed?: boolean;
-        error?: string;
-      };
-      if (!response.ok) {
-        setError(body.error || "Couldn’t check that email.");
+      if (result.needsName) {
+        setStep("name");
         return;
       }
-
-      if (body.exists) {
-        const known = Boolean(body.confirmed);
-        saveProfile({
-          name: body.name?.trim() || nextEmail.split("@")[0],
-          email: nextEmail,
-          welcomeSeen: true,
-          emailPending: !known,
-        });
-        router.push(known ? "/" : "/confirm");
-        router.refresh();
-        return;
-      }
-
-      router.push(`/signup?email=${encodeURIComponent(nextEmail)}`);
-    } catch {
-      setError("Couldn’t check that email.");
+      saveProfile({
+        name: result.name,
+        email: result.email,
+        welcomeSeen: true,
+        emailPending: false,
+      });
+      router.replace("/");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn’t continue just now.");
     } finally {
       setLoading(false);
     }
@@ -61,25 +55,64 @@ export default function LoginPage() {
   return (
     <div className="welcome">
       <p className="brand">Hold</p>
-      <h1 className="lede">What’s your email?</h1>
+      <h1 className="lede">{step === "email" ? "Welcome to Hold" : "What should we call you?"}</h1>
+      <p className="sub">
+        {step === "email"
+          ? "Enter your email to find your account, or skip to get started."
+          : email.trim()
+            ? "Add your name to create your account."
+            : "Your name and activity will be saved in this browser."}
+      </p>
       <form className="welcome-form" onSubmit={(event) => void onSubmit(event)}>
-        <label className="field">
-          <span>Email</span>
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@email.com"
-            maxLength={120}
-            required
-            autoFocus
-            disabled={loading}
-          />
-        </label>
-        {error ? <p className="error">{error}</p> : null}
-        <button type="submit" className="primary welcome-submit" disabled={loading || !email.trim()}>
+        {step === "email" ? (
+          <label className="field" key="email">
+            <span>Email (optional)</span>
+            <input
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
+              maxLength={254}
+              autoFocus
+              disabled={loading}
+            />
+          </label>
+        ) : (
+          <label className="field" key="name">
+            <span>Name</span>
+            <input
+              autoComplete="given-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Your name"
+              maxLength={40}
+              required
+              autoFocus
+              disabled={loading}
+            />
+          </label>
+        )}
+        {error ? <p className="error" role="alert">{error}</p> : null}
+        <button type="submit" className="primary welcome-submit" disabled={loading || (step === "name" && !name.trim())}>
           {loading ? "Loading…" : "Continue"}
         </button>
+        {step === "email" ? (
+          <button type="button" className="text-link" disabled={loading} onClick={() => {
+            setEmail("");
+            setError(null);
+            setStep("name");
+          }}>
+            Skip for now
+          </button>
+        ) : (
+          <button type="button" className="text-link" disabled={loading} onClick={() => {
+            setError(null);
+            setStep("email");
+          }}>
+            Back
+          </button>
+        )}
       </form>
     </div>
   );

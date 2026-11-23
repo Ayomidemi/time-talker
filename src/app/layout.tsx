@@ -1,15 +1,18 @@
 import type { Metadata, Viewport } from "next";
-import { Manrope, Syne } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const manrope = Manrope({
+const manrope = localFont({
+  src: "../../public/fonts/manrope-5.woff2",
   variable: "--font-manrope",
-  subsets: ["latin"],
+  weight: "200 800",
+  display: "swap",
 });
-
-const syne = Syne({
+const syne = localFont({
+  src: "../../public/fonts/syne-2.woff2",
   variable: "--font-syne",
-  subsets: ["latin"],
+  weight: "400 800",
+  display: "swap",
 });
 
 export const metadata: Metadata = {

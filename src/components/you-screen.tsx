@@ -101,7 +101,7 @@ export function YouScreen() {
         </label>
       </div>
 
-      <button type="button" className="text-link" onClick={() => void hold.logout()}>
+      <button type="button" className="text-link" disabled={hold.authLoading} onClick={() => void hold.logout()}>
         Logout
       </button>
     </section>

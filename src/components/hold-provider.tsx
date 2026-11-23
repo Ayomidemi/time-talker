@@ -1,13 +1,14 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { createContext, useContext } from "react";
+import { enterAccount, logoutAccount } from "@/lib/account-client";
+import { broadcastLogout, clearBrowserData, LOGOUT_CHANNEL } from "@/lib/logout";
 import { checkInPrompt } from "@/lib/prompts";
 import { ensureNotificationPermission, notify, speak, stopSpeech } from "@/lib/speech";
 import {
   appendCheckIn,
-  clearProfile,
   loadCheckIns,
   loadCommitments,
   loadProfile,
@@ -18,7 +19,6 @@ import {
   saveSettings,
   type Profile,
 } from "@/lib/storage";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   formatClock,
   formatWait,
@@ -36,14 +36,13 @@ import {
   type CheckIn,
   type CheckInStatus,
   type Commitment,
-  type Intensity,
   type Settings,
 } from "@/lib/types";
 
 const RADIUS = 54;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
-const GENTLE_NUDGE_MS = 12 * 60 * 1000;
-const ANNOYING_NUDGE_MS = 2 * 60 * 1000;
+const GENTLE_NUDGE_MS = 30 * 60 * 1000;
+const ANNOYING_NUDGE_MS = 10 * 60 * 1000;
 
 type HoldContextValue = {
   now: Date | null;
@@ -95,91 +94,53 @@ export function useHold() {
   return value;
 }
 
+const subscribeToHydration = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
+
 export function HoldProvider({ children }: { children: React.ReactNode }) {
+  const hydrated = useSyncExternalStore(subscribeToHydration, clientSnapshot, serverSnapshot);
+  // Keep the route children in the server tree so Next can validate them.
+  // The client instance initializes browser data once hydration is complete.
+  return <LocalHoldProvider key={hydrated ? "client" : "server"} hydrated={hydrated}>{children}</LocalHoldProvider>;
+}
+
+function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; hydrated: boolean }) {
   const router = useRouter();
-  const [now, setNow] = useState<Date | null>(null);
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [profile, setProfile] = useState<Profile>({
-    name: "",
-    email: "",
-    welcomeSeen: false,
-    emailPending: false,
-  });
-  const [commitments, setCommitments] = useState<Commitment[]>([]);
-  const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
+  const [now, setNow] = useState<Date | null>(() => hydrated ? new Date() : null);
+  const [settings, setSettings] = useState<Settings>(() => hydrated ? loadSettings() : DEFAULT_SETTINGS);
+  const [profile, setProfile] = useState<Profile>(() => hydrated ? loadProfile() : { name: "", email: "", welcomeSeen: false, emailPending: false });
+  const [commitmentDay, setCommitmentDay] = useState(() => hydrated ? todayKey() : "");
+  const [commitments, setCommitments] = useState<Commitment[]>(() => hydrated ? loadCommitments() : []);
+  const [checkIns, setCheckIns] = useState<CheckIn[]>(() => hydrated ? loadCheckIns() : []);
   const [draft, setDraft] = useState("");
-  const [nameDraft, setNameDraft] = useState("");
-  const [emailDraft, setEmailDraft] = useState("");
+  const [nameDraft, setNameDraft] = useState(profile.name);
+  const [emailDraft, setEmailDraft] = useState(profile.email);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const userEmail = profile.email || null;
   const [pendingSlot, setPendingSlot] = useState<string | null>(null);
-  const [lastCheckIn, setLastCheckIn] = useState<CheckInStatus | null>(null);
+  const [lastCheckIn, setLastCheckIn] = useState<CheckInStatus | null>(checkIns[0]?.status ?? null);
   const [lastPhrase, setLastPhrase] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hydrated, setHydrated] = useState(false);
 
+  const [loggingOut, setLoggingOut] = useState(false);
+  const loggingOutRef = useRef(false);
+  const clockTimerRef = useRef<number | null>(null);
   const announcedRef = useRef("");
   const lastNudgeRef = useRef(0);
-  const supabaseReady = isSupabaseConfigured();
 
   useEffect(() => {
-    const savedProfile = loadProfile();
-    const loadedCheckIns = loadCheckIns();
-    setProfile(savedProfile);
-    setNameDraft(savedProfile.name);
-    setEmailDraft(savedProfile.email);
-    setCommitments(loadCommitments());
-    setCheckIns(loadedCheckIns);
-    if (loadedCheckIns[0]) setLastCheckIn(loadedCheckIns[0].status);
-    setSettings(loadSettings());
-    setNow(new Date());
-    setHydrated(true);
-    const id = window.setInterval(() => setNow(new Date()), 250);
-    return () => {
-      window.clearInterval(id);
-      stopSpeech();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!supabaseReady) return;
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => {
-      const email = data.user?.email ?? null;
-      setUserEmail(email);
-      if (!email) return;
-      const metaName = data.user?.user_metadata?.name;
-      setProfile((prev) => {
-        const next = {
-          ...prev,
-          name: typeof metaName === "string" && metaName.trim() ? metaName.trim() : prev.name,
-          email,
-          welcomeSeen: true,
-          emailPending: false,
-        };
-        saveProfile(next);
-        return next;
-      });
-      if (typeof metaName === "string" && metaName.trim()) setNameDraft(metaName.trim());
-      setEmailDraft(email);
-    });
-  }, [supabaseReady]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    saveSettings(settings);
+    if (hydrated && !loggingOutRef.current) saveSettings(settings);
   }, [settings, hydrated]);
 
   useEffect(() => {
-    if (!hydrated) return;
-    saveCommitmentsForDay(todayKey(), commitments);
-  }, [commitments, hydrated]);
+    if (hydrated && !loggingOutRef.current) saveCommitmentsForDay(commitmentDay, commitments);
+  }, [commitmentDay, commitments, hydrated]);
 
   useEffect(() => {
-    if (!hydrated) return;
-    saveProfile(profile);
+    if (hydrated && !loggingOutRef.current) saveProfile(profile);
   }, [profile, hydrated]);
 
   const cadence: Cadence = settings.enabled ? settings.cadence : "off";
@@ -194,6 +155,7 @@ export function HoldProvider({ children }: { children: React.ReactNode }) {
   const greetingName = profile.name.trim();
 
   async function announce(text: string) {
+    if (loggingOutRef.current) return;
     setSpeaking(true);
     setLastPhrase(text);
     setError(null);
@@ -218,11 +180,19 @@ export function HoldProvider({ children }: { children: React.ReactNode }) {
     await announce(text);
   }
 
-  useEffect(() => {
-    if (!hydrated || !now || !settings.enabled || settings.cadence === "off") return;
-    const boundary = lastBoundary(now, settings.cadence);
+  const onClockTick = useEffectEvent(() => {
+    if (loggingOutRef.current) return;
+    const current = new Date();
+    setNow(current);
+    const day = todayKey(current);
+    if (day !== commitmentDay) {
+      setCommitmentDay(day);
+      setCommitments(loadCommitments(day));
+    }
+    if (!settings.enabled || settings.cadence === "off") return;
+    const boundary = lastBoundary(current, settings.cadence);
     if (boundary) {
-      const late = now.getTime() - boundary.getTime();
+      const late = current.getTime() - boundary.getTime();
       if (late >= 0 && late < 45_000) void fireSlot(boundary);
     }
     if (!pendingSlot) return;
@@ -236,39 +206,61 @@ export function HoldProvider({ children }: { children: React.ReactNode }) {
     } else {
       notify("Hold", prompt);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [now, hydrated, settings.enabled, settings.cadence, settings.intensity, pendingSlot, commitments]);
+  });
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const id = window.setInterval(() => onClockTick(), 250);
+    clockTimerRef.current = id;
+    return () => {
+      window.clearInterval(id);
+      clockTimerRef.current = null;
+      stopSpeech();
+    };
+  }, [hydrated]);
 
   function updateSettings(partial: Partial<Settings>) {
+    if (loggingOutRef.current) return;
     setSettings((prev) => ({ ...prev, ...partial }));
   }
 
-  async function logout() {
+  async function logout(broadcast = true) {
+    if (loggingOutRef.current) return;
+    loggingOutRef.current = true;
+    setLoggingOut(true);
+    if (clockTimerRef.current !== null) window.clearInterval(clockTimerRef.current);
     stopSpeech();
-    announcedRef.current = "";
-    lastNudgeRef.current = 0;
-    setSpeaking(false);
-    setPendingSlot(null);
-    setLastPhrase(null);
-    setError(null);
-    clearProfile();
-    setProfile({ name: "", email: "", welcomeSeen: false, emailPending: false });
-    setNameDraft("");
-    setEmailDraft("");
-    setAuthMessage(null);
-    setAuthLoading(false);
-    setUserEmail(null);
-    setLastCheckIn(null);
-    if (supabaseReady) {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-    }
-    router.push("/login");
-    router.refresh();
+    setAuthLoading(true);
+    if (broadcast) broadcastLogout();
+    // Neither a failed request nor unavailable browser storage should keep
+    // the clock running or leave the user on their previous profile.
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.allSettled([logoutAccount(), clearBrowserData()]),
+      new Promise<void>((resolve) => { timeout = setTimeout(resolve, 5000); }),
+    ]);
+    clearTimeout(timeout);
+    window.location.replace("/login");
   }
+
+  const onOtherTabLogout = useEffectEvent(() => { void logout(false); });
+  useEffect(() => {
+    if (!hydrated) return;
+    const channel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(LOGOUT_CHANNEL);
+    if (channel) channel.onmessage = () => onOtherTabLogout();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null && event.storageArea === window.localStorage) onOtherTabLogout();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      channel?.close();
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [hydrated]);
 
   function addCommitment(event: FormEvent) {
     event.preventDefault();
+    if (loggingOutRef.current) return;
     const title = draft.trim();
     if (!title) return;
     setCommitments((prev) => [
@@ -294,6 +286,7 @@ export function HoldProvider({ children }: { children: React.ReactNode }) {
   }
 
   function recordCheckIn(status: CheckInStatus) {
+    if (loggingOutRef.current) return;
     const entry: CheckIn = {
       id: newId(),
       slot: new Date().toISOString(),
@@ -315,33 +308,24 @@ export function HoldProvider({ children }: { children: React.ReactNode }) {
 
   async function saveAccountEmail(event: FormEvent) {
     event.preventDefault();
+    if (loggingOutRef.current) return;
     const name = nameDraft.trim() || profile.name.trim();
     const email = emailDraft.trim();
     if (!name || !email) return;
     setAuthLoading(true);
     setAuthMessage(null);
     try {
-      const next = { name, email, welcomeSeen: true, emailPending: supabaseReady };
+      const result = await enterAccount({ name, email });
+      if (loggingOutRef.current) return;
+      if (result.needsName) throw new Error("Name is required.");
+      const next = { name: result.name, email: result.email, welcomeSeen: true, emailPending: false };
+      setNameDraft(result.name);
+      setEmailDraft(result.email);
       setProfile(next);
       saveProfile(next);
-      if (!supabaseReady) {
-        setAuthMessage("Email saved on this device.");
-        return;
-      }
-      const supabase = createClient();
-      const { error: authError } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-          data: { name },
-          shouldCreateUser: true,
-        },
-      });
-      if (authError) {
-        setAuthMessage(authError.message);
-        return;
-      }
-      router.push("/confirm");
+      router.push(result.next);
+    } catch (err) {
+      setAuthMessage(err instanceof Error ? err.message : "Couldn’t save that email.");
     } finally {
       setAuthLoading(false);
     }
@@ -349,22 +333,21 @@ export function HoldProvider({ children }: { children: React.ReactNode }) {
 
   async function enableAnnoyingExtras() {
     const ok = await ensureNotificationPermission();
+    if (loggingOutRef.current) return;
     if (!ok) setError("Allow notifications so Hold can nudge you in the background.");
     updateSettings({ intensity: "annoying" });
   }
 
   function saveName() {
+    if (loggingOutRef.current) return;
     const name = nameDraft.trim();
     if (!name) {
       setAuthMessage("Name is required.");
       setNameDraft(profile.name);
       return;
     }
-    setProfile((prev) => {
-      const next = { ...prev, name, welcomeSeen: true };
-      saveProfile(next);
-      return next;
-    });
+    setAuthMessage(null);
+    setProfile((prev) => ({ ...prev, name, welcomeSeen: true }));
   }
 
   const untilLabel =
@@ -419,7 +402,7 @@ export function HoldProvider({ children }: { children: React.ReactNode }) {
     saveName,
   };
 
-  return <HoldContext.Provider value={value}>{children}</HoldContext.Provider>;
+  return <HoldContext.Provider value={value}>{loggingOut ? <div className="boot">Signing out…</div> : children}</HoldContext.Provider>;
 }
 
 export { RADIUS };

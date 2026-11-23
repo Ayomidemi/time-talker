@@ -1,3 +1,10 @@
+const activeNotifications = new Set<Notification>();
+
+export function stopNotifications() {
+  activeNotifications.forEach((notification) => notification.close());
+  activeNotifications.clear();
+}
+
 export function stopSpeech() {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
@@ -23,7 +30,9 @@ export function notify(title: string, body: string) {
   if (typeof window === "undefined" || !("Notification" in window)) return;
   if (Notification.permission !== "granted") return;
   try {
-    new Notification(title, { body, tag: "hold-check-in" });
+    const notification = new Notification(title, { body, tag: "hold-check-in" });
+    activeNotifications.add(notification);
+    notification.onclose = () => activeNotifications.delete(notification);
   } catch {
     // Ignore browsers that block Notification construction.
   }

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -25,5 +26,5 @@
     "tailwindcss": "4.3.3",
     "typescript": "^5"
   },
-  "description": "Hold yourself accountable — spoken check-ins on the clock."
+  "description": "Hold yourself accountable \u2014 spoken check-ins on the clock."
 }

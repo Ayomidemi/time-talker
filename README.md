@@ -9,7 +9,7 @@ Hold is a web/PWA accountability clock. It speaks the time on a half-hour or qua
 - Next.js + TypeScript
 - Web Speech API (works in the browser)
 - Browser notifications for background nudges
-- Supabase for auth + optional sync
+- Supabase for optional email profiles
 - Deploy on Vercel
 
 ## Run locally
@@ -26,16 +26,28 @@ Without Supabase keys, Hold runs in **local mode** (settings, commitments, and c
 
 ## Supabase setup
 
-Supabase is for **optional sign-in** (name + email magic link), not a “sync box” in the UI.
+Start with an optional email. Skip it to enter a name and use Hold locally. An existing email opens Hold with its saved name; a new email asks for a name and creates a profile. No email verification is sent.
+
+Email profiles are intentionally unverified, so anyone with an email can retrieve its saved name. They do not create a Supabase Auth session or grant access to private authenticated data. Settings, commitments, and check-ins remain in this browser for both guests and email profiles; they do not sync across devices.
 
 1. Create a project at [supabase.com](https://supabase.com).
 2. Put the project URL and anon key in `.env.local` (never put the database password in `NEXT_PUBLIC_*` vars).
-3. Run `supabase/schema.sql` in the Supabase SQL editor.
-4. Under Authentication → URL configuration, add:
-   - Site URL: `http://localhost:3000` (and your Vercel URL later)
-   - Redirect URL: `http://localhost:3000/auth/callback`
+3. For a new database, run `supabase/schema.sql` in the Supabase SQL editor. For an existing installation, run `supabase/migrations/20261123_email_accounts.sql` instead; it preserves names from previous Auth accounts.
 
-On **You**, people can save a name and optionally email themselves a sign-in link.
+To apply the migration in the Supabase dashboard:
+
+1. Open your project and choose **SQL Editor** → **New query**.
+2. Paste the entire contents of `supabase/migrations/20261123_email_accounts.sql`.
+3. Click **Run**. It is safe to rerun this migration; it does not overwrite existing names.
+4. Refresh Hold and try a new email, then log out and enter the same email again. The second visit should skip name entry.
+
+On **You**, guests can add an email to create or open an email profile.
+
+## Checks
+
+Run `npm run lint`, `npm test`, and `npm run build`. If your environment prevents Turbopack from starting its compiler process, use `npm run build -- --webpack`.
+
+Manrope and Syne are bundled in `public/fonts` with their license, so builds do not need to download fonts.
 
 ## Deploy on Vercel
 
@@ -52,7 +64,7 @@ On **You**, people can save a name and optionally email themselves a sign-in lin
 - Today’s commitments (up to 3)
 - Check-in logging + recent honesty list
 - PWA manifest for “Add to Home Screen”
-- Supabase magic-link auth shell
+- Optional email-only profiles with a local guest mode
 
 ## What’s next
 
