@@ -59,7 +59,7 @@ export function TodayScreen() {
               disabled={hold.commitmentsLoading || hold.commitmentsSaving || Boolean(hold.commitmentsError)}
             />
           </label>
-          <button type="submit" className="primary compact" disabled={hold.commitmentsLoading || hold.commitmentsSaving || Boolean(hold.commitmentsError) || !hold.draft.trim()}>
+          <button type="submit" className="primary compact add-btn" disabled={hold.commitmentsLoading || hold.commitmentsSaving || Boolean(hold.commitmentsError) || !hold.draft.trim()}>
             Add
           </button>
         </form>

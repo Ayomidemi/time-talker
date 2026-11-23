@@ -296,6 +296,10 @@ button {
   padding: 12px 16px;
 }
 
+.add-btn {
+  margin-top: 15px;
+}
+
 .ghost-btn {
   border: 1px solid var(--line);
   background: transparent;
