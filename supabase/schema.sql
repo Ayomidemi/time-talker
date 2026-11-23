@@ -78,3 +78,36 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+create or replace function public.lookup_account(target_email text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  found_name text;
+  confirmed_at timestamptz;
+begin
+  select coalesce(nullif(p.display_name, ''), split_part(u.email, '@', 1)),
+         u.email_confirmed_at
+  into found_name, confirmed_at
+  from auth.users u
+  left join public.profiles p on p.id = u.id
+  where lower(u.email) = lower(trim(target_email))
+  limit 1;
+
+  if found_name is null then
+    return jsonb_build_object('exists', false);
+  end if;
+
+  return jsonb_build_object(
+    'exists', true,
+    'name', found_name,
+    'confirmed', confirmed_at is not null
+  );
+end;
+$$;
+
+revoke all on function public.lookup_account(text) from public;
+grant execute on function public.lookup_account(text) to anon, authenticated;

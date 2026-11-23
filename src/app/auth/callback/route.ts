@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { PENDING_COOKIE } from "@/lib/cookies";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const origin = url.origin;
+  const destination = NextResponse.redirect(`${origin}/`);
 
   if (!code) {
-    return NextResponse.redirect(`${origin}/?auth=missing`);
+    return NextResponse.redirect(`${origin}/login?auth=missing`);
   }
 
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    return NextResponse.redirect(`${origin}/?auth=unconfigured`);
+    return NextResponse.redirect(`${origin}/login?auth=unconfigured`);
   }
 
   const cookieStore = await cookies();
@@ -25,13 +27,9 @@ export async function GET(request: Request) {
           return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
-          } catch {
-            // Called from a Server Component context; safe to ignore.
-          }
+          cookiesToSet.forEach(({ name, value, options }) => {
+            destination.cookies.set(name, value, options);
+          });
         },
       },
     },
@@ -39,8 +37,9 @@ export async function GET(request: Request) {
 
   const { error } = await supabase.auth.exchangeCodeForSession(code);
   if (error) {
-    return NextResponse.redirect(`${origin}/?auth=error`);
+    return NextResponse.redirect(`${origin}/confirm?auth=error`);
   }
 
-  return NextResponse.redirect(`${origin}/`);
+  destination.cookies.set(PENDING_COOKIE, "", { path: "/", maxAge: 0 });
+  return destination;
 }

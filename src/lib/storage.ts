@@ -1,4 +1,4 @@
-import { clearCookie, readCookie, writeCookie } from "./cookies";
+import { clearCookie, EMAIL_COOKIE, NAME_COOKIE, PENDING_COOKIE, readCookie, writeCookie } from "./cookies";
 import { DEFAULT_SETTINGS, type CheckIn, type Commitment, type Settings } from "./types";
 import { todayKey } from "./time";
 
@@ -6,8 +6,6 @@ const SETTINGS_KEY = "hold.settings";
 const COMMITMENTS_KEY = "hold.commitments";
 const CHECKINS_KEY = "hold.checkins";
 const PROFILE_KEY = "hold.profile";
-const NAME_COOKIE = "hold_name";
-const EMAIL_COOKIE = "hold_email";
 
 export type Profile = {
   name: string;
@@ -76,7 +74,7 @@ export function loadProfile(): Profile {
     name,
     email,
     welcomeSeen: Boolean(name) || Boolean(legacy.welcomeSeen),
-    emailPending: Boolean(legacy.emailPending),
+    emailPending: readCookie(PENDING_COOKIE) === "1" || Boolean(legacy.emailPending),
   };
 }
 
@@ -86,10 +84,13 @@ export function saveProfile(profile: Profile) {
   else clearCookie(NAME_COOKIE);
   if (profile.email.trim()) writeCookie(EMAIL_COOKIE, profile.email.trim());
   else clearCookie(EMAIL_COOKIE);
+  if (profile.emailPending) writeCookie(PENDING_COOKIE, "1");
+  else clearCookie(PENDING_COOKIE);
 }
 
 export function clearProfile() {
   writeJson(PROFILE_KEY, { name: "", email: "", welcomeSeen: false, emailPending: false });
   clearCookie(NAME_COOKIE);
   clearCookie(EMAIL_COOKIE);
+  clearCookie(PENDING_COOKIE);
 }

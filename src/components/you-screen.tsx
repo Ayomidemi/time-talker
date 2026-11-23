@@ -1,0 +1,109 @@
+"use client";
+
+import { useHold } from "@/components/hold-provider";
+import type { Cadence, Intensity } from "@/lib/types";
+
+export function YouScreen() {
+  const hold = useHold();
+  if (!hold.hydrated) return <div className="boot">Hold</div>;
+
+  return (
+    <section className="screen" aria-label="You">
+      <header className="screen-head">
+        <p className="eyebrow">You</p>
+        <h1 className="screen-title">{hold.greetingName || "Your Hold"}</h1>
+      </header>
+
+      <label className="field">
+        <span>Name</span>
+        <input
+          value={hold.nameDraft}
+          onChange={(event) => hold.setNameDraft(event.target.value)}
+          onBlur={hold.saveName}
+          placeholder="Your name"
+          maxLength={40}
+          required
+        />
+      </label>
+
+      <label className="field">
+        <span>Email</span>
+        <input
+          type="email"
+          value={hold.lockedEmail ? hold.userEmail || hold.profile.email : hold.emailDraft}
+          onChange={(event) => hold.setEmailDraft(event.target.value)}
+          placeholder="Optional"
+          maxLength={120}
+          disabled={hold.lockedEmail}
+        />
+      </label>
+      {hold.showSaveEmail ? (
+        <form className="stack-form" onSubmit={(event) => void hold.saveAccountEmail(event)}>
+          <button type="submit" className="primary" disabled={hold.authLoading}>
+            {hold.authLoading ? "Loading…" : "Save account details"}
+          </button>
+        </form>
+      ) : null}
+      {hold.authMessage ? <p className="empty">{hold.authMessage}</p> : null}
+
+      <div className="stack">
+        <div className="row">
+          <div>
+            <p className="row-title">Spoken cadence</p>
+            <p className="row-help">Hold speaks on a schedule.</p>
+          </div>
+          <button
+            type="button"
+            className="switch"
+            role="switch"
+            aria-checked={hold.settings.enabled}
+            aria-label="Spoken cadence"
+            onClick={() => hold.updateSettings({ enabled: !hold.settings.enabled })}
+          >
+            <span className="knob" />
+          </button>
+        </div>
+
+        <label className="field">
+          <span>How often</span>
+          <select
+            value={hold.settings.cadence}
+            onChange={(event) => hold.updateSettings({ cadence: event.target.value as Cadence })}
+          >
+            <option value="half">Every half hour</option>
+            <option value="quarter">Every quarter hour</option>
+            <option value="off">Only when I ask</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span>Intensity</span>
+          <select
+            value={hold.settings.intensity}
+            onChange={(event) => {
+              const value = event.target.value as Intensity;
+              if (value === "annoying") void hold.enableAnnoyingExtras();
+              else hold.updateSettings({ intensity: value });
+            }}
+          >
+            <option value="gentle">Gentle</option>
+            <option value="annoying">Annoying</option>
+          </select>
+        </label>
+
+        <label className="check-line">
+          <input
+            type="checkbox"
+            checked={hold.settings.includePeriod}
+            onChange={(event) => hold.updateSettings({ includePeriod: event.target.checked })}
+          />
+          <span>Say morning / afternoon / evening / night</span>
+        </label>
+      </div>
+
+      <button type="button" className="text-link" onClick={() => void hold.logout()}>
+        Logout
+      </button>
+    </section>
+  );
+}

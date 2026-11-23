@@ -89,19 +89,29 @@ button {
 .welcome-form {
   display: grid;
   gap: 12px;
-  margin-top: 28px;
+  margin-top: 2px;
+}
+
+.welcome-form .welcome-submit {
+  margin-top: 20px;
 }
 
 .app {
+  height: 100dvh;
   min-height: 100dvh;
-  padding-bottom: calc(132px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: calc(88px + env(safe-area-inset-bottom));
 }
 
 .stage {
-  min-height: 100dvh;
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  padding: 24px 20px calc(132px + env(safe-area-inset-bottom));
+  padding: 24px 20px 8px;
+  overflow: hidden;
 }
 
 .stage-top {
@@ -119,7 +129,7 @@ button {
 
 .hello,
 .lede {
-  margin: 12px 0 0;
+  margin: 12px 0 12px 0;
   max-width: 14ch;
   font-family: var(--display);
   font-size: clamp(1.45rem, 5vw, 1.8rem);
@@ -131,26 +141,29 @@ button {
 .sub,
 .empty,
 .row-help {
-  margin: 10px 0 0;
+  margin: 10px 0 0 0;
   color: var(--muted);
   font-size: 0.95rem;
 }
 
 .clock-plane {
-  position: relative;
-  width: min(100%, 300px);
-  max-height: min(42dvh, 300px);
-  margin: 4px auto;
-  aspect-ratio: 1;
+  min-height: 0;
+  height: 100%;
   display: grid;
   place-items: center;
 }
 
+.ring,
+.face {
+  grid-area: 1 / 1;
+}
+
 .ring {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  position: relative;
+  height: min(100%, 280px);
+  width: auto;
+  max-width: 100%;
+  aspect-ratio: 1;
 }
 
 .track,
@@ -177,6 +190,7 @@ button {
 
 .face {
   position: relative;
+  z-index: 1;
   text-align: center;
   user-select: none;
 }
@@ -306,8 +320,37 @@ button {
   color: var(--muted);
 }
 
+.pill.selected {
+  background: rgba(200, 245, 66, 0.14);
+  border-color: color-mix(in oklab, var(--hold) 55%, var(--line));
+}
+
+.pill.warn.selected {
+  background: rgba(255, 107, 74, 0.14);
+  border-color: color-mix(in oklab, var(--warn) 55%, var(--line));
+}
+
+.checkin-row.urgent .pill {
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--hold) 35%, transparent);
+}
+
+input:disabled,
+select:disabled,
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.welcome strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .screen {
-  padding: 28px 20px calc(132px + env(safe-area-inset-bottom));
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 28px 20px 24px;
   animation: rise 280ms ease;
 }
 
@@ -554,18 +597,26 @@ select {
   font-size: 0.8rem;
 }
 
-.dock button {
+.dock a {
   border: 0;
   border-radius: 999px;
   padding: 12px 8px;
   background: transparent;
   color: var(--faint);
   font-weight: 700;
+  text-align: center;
+  text-decoration: none;
 }
 
-.dock button.active {
+.dock a.active {
   background: rgba(200, 245, 66, 0.14);
   color: var(--hold);
+}
+
+a.ghost-btn {
+  display: grid;
+  place-items: center;
+  text-decoration: none;
 }
 
 @keyframes rise {

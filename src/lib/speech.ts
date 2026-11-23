@@ -1,9 +1,14 @@
+export function stopSpeech() {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+}
+
 export function speak(text: string) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) {
     return Promise.reject(new Error("Speech is not available in this browser."));
   }
 
-  window.speechSynthesis.cancel();
+  stopSpeech();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.rate = 1;
 

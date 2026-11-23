@@ -1,5 +1,9 @@
 const YEAR = 60 * 60 * 24 * 365;
 
+export const NAME_COOKIE = "hold_name";
+export const EMAIL_COOKIE = "hold_email";
+export const PENDING_COOKIE = "hold_pending";
+
 export function readCookie(name: string) {
   if (typeof document === "undefined") return "";
   const match = document.cookie
