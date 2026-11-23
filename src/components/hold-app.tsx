@@ -7,12 +7,15 @@ import {
   appendCheckIn,
   loadCheckIns,
   loadCommitments,
+  loadProfile,
   loadSettings,
   newId,
   saveCommitmentsForDay,
+  saveProfile,
   saveSettings,
+  type Profile,
 } from "@/lib/storage";
-import { isSupabaseConfigured, createClient } from "@/lib/supabase/client";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import {
   formatClock,
   formatWait,
@@ -34,17 +37,22 @@ import {
   type Settings,
 } from "@/lib/types";
 
+type View = "welcome" | "home" | "today" | "you";
+
 const RADIUS = 54;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 const GENTLE_NUDGE_MS = 12 * 60 * 1000;
 const ANNOYING_NUDGE_MS = 2 * 60 * 1000;
 
 export function HoldApp() {
+  const [view, setView] = useState<View>("home");
   const [now, setNow] = useState<Date | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [profile, setProfile] = useState<Profile>({ name: "", welcomeSeen: false });
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
   const [draft, setDraft] = useState("");
+  const [nameDraft, setNameDraft] = useState("");
   const [email, setEmail] = useState("");
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -59,10 +67,14 @@ export function HoldApp() {
   const supabaseReady = isSupabaseConfigured();
 
   useEffect(() => {
+    const savedProfile = loadProfile();
+    setProfile(savedProfile);
+    setNameDraft(savedProfile.name);
     setCommitments(loadCommitments());
     setCheckIns(loadCheckIns());
     setSettings(loadSettings());
     setNow(new Date());
+    setView(savedProfile.welcomeSeen ? "home" : "welcome");
     setHydrated(true);
     const id = window.setInterval(() => setNow(new Date()), 250);
     return () => window.clearInterval(id);
@@ -73,6 +85,15 @@ export function HoldApp() {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data }) => {
       setUserEmail(data.user?.email ?? null);
+      const metaName = data.user?.user_metadata?.name;
+      if (typeof metaName === "string" && metaName.trim()) {
+        setProfile((prev) => {
+          const next = { ...prev, name: metaName.trim(), welcomeSeen: true };
+          saveProfile(next);
+          return next;
+        });
+        setNameDraft(metaName.trim());
+      }
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setUserEmail(session?.user?.email ?? null);
@@ -90,6 +111,11 @@ export function HoldApp() {
     saveCommitmentsForDay(todayKey(), commitments);
   }, [commitments, hydrated]);
 
+  useEffect(() => {
+    if (!hydrated) return;
+    saveProfile(profile);
+  }, [profile, hydrated]);
+
   const cadence: Cadence = settings.enabled ? settings.cadence : "off";
   const next = useMemo(
     () => (now ? nextAnnouncement(now, cadence === "off" ? "half" : cadence) : null),
@@ -99,6 +125,7 @@ export function HoldApp() {
   const clock = now ? formatClock(now) : { hm: "–:––", sec: "––", ap: "––" };
   const openCommitments = commitments.filter((item) => !item.done);
   const awaitingCheckIn = Boolean(pendingSlot);
+  const greetingName = profile.name.trim();
 
   async function announce(text: string) {
     setSpeaking(true);
@@ -118,11 +145,12 @@ export function HoldApp() {
     if (announcedRef.current === key) return;
     announcedRef.current = key;
     setPendingSlot(key);
+    setView("home");
     lastNudgeRef.current = Date.now();
 
     const timeLine = phraseFor(slotDate, { includePeriod: settings.includePeriod });
     const prompt = checkInPrompt(commitments, settings.intensity);
-    const text = `${timeLine} ${prompt}`;
+    const text = greetingName ? `${greetingName}. ${timeLine} ${prompt}` : `${timeLine} ${prompt}`;
     notify("Hold", prompt);
     await announce(text);
   }
@@ -133,9 +161,7 @@ export function HoldApp() {
     const boundary = lastBoundary(now, settings.cadence);
     if (boundary) {
       const late = now.getTime() - boundary.getTime();
-      if (late >= 0 && late < 45_000) {
-        void fireSlot(boundary);
-      }
+      if (late >= 0 && late < 45_000) void fireSlot(boundary);
     }
 
     if (!pendingSlot) return;
@@ -157,19 +183,28 @@ export function HoldApp() {
     setSettings((prev) => ({ ...prev, ...partial }));
   }
 
+  function finishWelcome(event?: FormEvent) {
+    event?.preventDefault();
+    const name = nameDraft.trim();
+    setProfile({ name, welcomeSeen: true });
+    setView("home");
+  }
+
   function addCommitment(event: FormEvent) {
     event.preventDefault();
     const title = draft.trim();
     if (!title) return;
-    const item: Commitment = {
-      id: newId(),
-      title,
-      done: false,
-      day: todayKey(),
-      dueAt: null,
-      createdAt: new Date().toISOString(),
-    };
-    setCommitments((prev) => [...prev, item]);
+    setCommitments((prev) => [
+      ...prev,
+      {
+        id: newId(),
+        title,
+        done: false,
+        day: todayKey(),
+        dueAt: null,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
     setDraft("");
   }
 
@@ -186,7 +221,7 @@ export function HoldApp() {
   function recordCheckIn(status: CheckInStatus) {
     const entry: CheckIn = {
       id: newId(),
-      slot: pendingSlot ? new Date().toISOString() : new Date().toISOString(),
+      slot: new Date().toISOString(),
       status,
       note: openCommitments[0]?.title ?? null,
       createdAt: new Date().toISOString(),
@@ -202,22 +237,34 @@ export function HoldApp() {
   async function speakNow() {
     const text = phraseFor(new Date(), { includePeriod: settings.includePeriod });
     const prompt = checkInPrompt(commitments, settings.intensity);
-    await announce(`${text} ${prompt}`);
+    const lead = greetingName ? `${greetingName}. ` : "";
+    await announce(`${lead}${text} ${prompt}`);
   }
 
   async function signIn(event: FormEvent) {
     event.preventDefault();
-    if (!supabaseReady) {
-      setAuthMessage("Add Supabase keys in .env.local to enable sync.");
+    const name = nameDraft.trim();
+    if (!name) {
+      setAuthMessage("Add your name first.");
       return;
     }
-    setAuthMessage("Sending magic link…");
+    setProfile((prev) => ({ ...prev, name, welcomeSeen: true }));
+
+    if (!supabaseReady) {
+      setAuthMessage("Sign-in needs Supabase keys in .env.local. Your name is saved on this device.");
+      return;
+    }
+
+    setAuthMessage("Sending a sign-in link…");
     const supabase = createClient();
     const { error: authError } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        data: { name },
+      },
     });
-    setAuthMessage(authError ? authError.message : "Check your email for a magic link.");
+    setAuthMessage(authError ? authError.message : "Check your email for a sign-in link.");
   }
 
   async function signOut() {
@@ -229,226 +276,293 @@ export function HoldApp() {
 
   async function enableAnnoyingExtras() {
     const ok = await ensureNotificationPermission();
-    if (!ok) setError("Allow notifications so Hold can nudge you when the tab is in the background.");
+    if (!ok) setError("Allow notifications so Hold can nudge you in the background.");
     updateSettings({ intensity: "annoying" });
   }
 
   const untilLabel =
     !settings.enabled || settings.cadence === "off"
-      ? "Announcements are off"
+      ? "Cadence is off"
       : next && now
-        ? `${formatWait(next.getTime() - now.getTime())} until ${formatWhen(next)}`
-        : "Starting the clock…";
+        ? `${formatWait(next.getTime() - now.getTime())} to ${formatWhen(next)}`
+        : "Starting…";
 
-  const preview =
-    next && settings.enabled && settings.cadence !== "off"
-      ? phraseFor(next, { includePeriod: settings.includePeriod })
-      : "Turn on a cadence to schedule the next hold.";
+  if (!hydrated) {
+    return <div className="boot">Hold</div>;
+  }
+
+  if (view === "welcome") {
+    return (
+      <div className="welcome">
+        <p className="brand">Hold</p>
+        <h1 className="lede">What should we call you?</h1>
+        <p className="sub">Optional — Hold can greet you by name when it checks in.</p>
+        <form className="welcome-form" onSubmit={finishWelcome}>
+          <input
+            value={nameDraft}
+            onChange={(event) => setNameDraft(event.target.value)}
+            placeholder="Your name"
+            maxLength={40}
+            autoFocus
+          />
+          <button type="submit" className="primary">
+            Continue
+          </button>
+        </form>
+        <button type="button" className="text-link" onClick={() => finishWelcome()}>
+          Skip for now
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="hold-shell">
-      <header className="hero">
-        <p className="brand">Hold</p>
-        <h1 className="lede">Keep what you said you would do.</h1>
-        <p className="sub">
-          Spoken check-ins on the clock — gentle when you need space, annoying when you need a push.
-        </p>
-      </header>
+    <div className={`app ${view}`}>
+      {view === "home" ? (
+        <section className="stage" aria-label="Hold">
+          <header className="stage-top">
+            <p className="brand">Hold</p>
+            <p className="hello">{greetingName ? `Hey ${greetingName}` : "Keep what you said."}</p>
+          </header>
 
-      <section className="clock-card" aria-label="Clock">
-        <div className="clock">
-          <svg className="ring" viewBox="0 0 120 120" aria-hidden="true">
-            <circle className="track" cx="60" cy="60" r={RADIUS} />
-            <circle
-              className={`progress ${settings.intensity === "annoying" ? "hot" : ""}`}
-              cx="60"
-              cy="60"
-              r={RADIUS}
-              style={{
-                strokeDasharray: String(CIRCUMFERENCE),
-                strokeDashoffset: String(CIRCUMFERENCE * (1 - (settings.enabled ? progress : 0))),
-              }}
-            />
-          </svg>
-          <div className="face">
-            <p className="time">
-              <span>{clock.hm}</span>
-              <span className="sec">{clock.sec}</span>
-            </p>
-            <p className="ampm">{clock.ap}</p>
+          <div className="clock-plane" aria-label="Clock">
+            <svg className="ring" viewBox="0 0 120 120" aria-hidden="true">
+              <circle className="track" cx="60" cy="60" r={RADIUS} />
+              <circle
+                className={`progress ${settings.intensity === "annoying" ? "hot" : ""}`}
+                cx="60"
+                cy="60"
+                r={RADIUS}
+                style={{
+                  strokeDasharray: String(CIRCUMFERENCE),
+                  strokeDashoffset: String(CIRCUMFERENCE * (1 - (settings.enabled ? progress : 0))),
+                }}
+              />
+            </svg>
+            <div className="face">
+              <p className="time">
+                <span>{clock.hm}</span>
+                <span className="sec">{clock.sec}</span>
+              </p>
+              <p className="ampm">{clock.ap}</p>
+            </div>
           </div>
-        </div>
-      </section>
 
-      <section className="status-block">
-        <p className="until">{speaking ? "Speaking now" : awaitingCheckIn ? "Waiting for your check-in" : untilLabel}</p>
-        <p className="phrase">{lastPhrase || preview}</p>
-        {error ? <p className="error">{error}</p> : null}
-      </section>
+          <div className="stage-bottom">
+            <p className="until">
+              {speaking ? "Speaking…" : awaitingCheckIn ? "Check in to continue" : untilLabel}
+            </p>
+            <p className="phrase">
+              {awaitingCheckIn
+                ? "How are you holding?"
+                : lastPhrase || openCommitments[0]?.title || "Add what you’re holding today."}
+            </p>
+            {error ? <p className="error">{error}</p> : null}
 
-      {awaitingCheckIn ? (
-        <section className="checkin panel" aria-label="Check in">
-          <p className="panel-title">How are you holding?</p>
-          <div className="checkin-row">
-            <button type="button" className="pill good" onClick={() => recordCheckIn("on_track")}>
-              On track
-            </button>
-            <button type="button" className="pill warn" onClick={() => recordCheckIn("slacking")}>
-              Slacking
-            </button>
-            <button type="button" className="pill mute" onClick={() => recordCheckIn("break")}>
-              Break
-            </button>
+            {awaitingCheckIn ? (
+              <div className="checkin-row" aria-label="Check in">
+                <button type="button" className="pill good" onClick={() => recordCheckIn("on_track")}>
+                  On track
+                </button>
+                <button type="button" className="pill warn" onClick={() => recordCheckIn("slacking")}>
+                  Slacking
+                </button>
+                <button type="button" className="pill mute" onClick={() => recordCheckIn("break")}>
+                  Break
+                </button>
+              </div>
+            ) : (
+              <div className="cta-row">
+                <button type="button" className="primary" onClick={() => void speakNow()} disabled={speaking}>
+                  {speaking ? "Speaking…" : "Say the time"}
+                </button>
+                <button type="button" className="ghost-btn" onClick={() => setView("today")}>
+                  Today
+                </button>
+              </div>
+            )}
           </div>
         </section>
       ) : null}
 
-      <section className="panel" aria-label="Today’s commitments">
-        <p className="panel-title">Today’s hold</p>
-        <p className="panel-help">Up to three things you intend to finish.</p>
-        <ul className="commitment-list">
-          {commitments.map((item) => (
-            <li key={item.id} className={item.done ? "done" : ""}>
-              <button type="button" className="check" onClick={() => toggleDone(item.id)} aria-label="Toggle done">
-                <span />
-              </button>
-              <span className="title">{item.title}</span>
-              <button type="button" className="ghost" onClick={() => removeCommitment(item.id)}>
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-        {commitments.length < 3 ? (
-          <form className="add-form" onSubmit={addCommitment}>
-            <input
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="Add a commitment"
-              maxLength={120}
-            />
-            <button type="submit" className="say compact">
-              Add
-            </button>
-          </form>
-        ) : null}
-      </section>
+      {view === "today" ? (
+        <section className="screen" aria-label="Today">
+          <header className="screen-head">
+            <p className="eyebrow">Today</p>
+            <h1 className="screen-title">What are you holding?</h1>
+          </header>
 
-      <section className="panel" aria-label="Cadence settings">
-        <div className="row">
-          <div>
-            <p className="row-title">Spoken cadence</p>
-            <p className="row-help">Hold speaks on the schedule you choose.</p>
-          </div>
-          <button
-            type="button"
-            className="switch"
-            role="switch"
-            aria-checked={settings.enabled}
-            aria-label="Spoken cadence"
-            onClick={() => updateSettings({ enabled: !settings.enabled })}
-          >
-            <span className="knob" />
-          </button>
-        </div>
-
-        <label className="field">
-          <span>How often</span>
-          <select
-            value={settings.cadence}
-            onChange={(event) => updateSettings({ cadence: event.target.value as Cadence })}
-          >
-            <option value="half">Every half hour</option>
-            <option value="quarter">Every quarter hour</option>
-            <option value="off">Time only when I ask</option>
-          </select>
-        </label>
-
-        <label className="field">
-          <span>Intensity</span>
-          <select
-            value={settings.intensity}
-            onChange={(event) => {
-              const value = event.target.value as Intensity;
-              if (value === "annoying") void enableAnnoyingExtras();
-              else updateSettings({ intensity: value });
-            }}
-          >
-            <option value="gentle">Gentle</option>
-            <option value="annoying">Annoying</option>
-          </select>
-        </label>
-
-        <label className="check-line">
-          <input
-            type="checkbox"
-            checked={settings.includePeriod}
-            onChange={(event) => updateSettings({ includePeriod: event.target.checked })}
-          />
-          <span>Say the time of day, such as “in the afternoon.”</span>
-        </label>
-
-        <button type="button" className="say" onClick={() => void speakNow()} disabled={speaking}>
-          {speaking ? "Speaking…" : "Say the time now"}
-        </button>
-      </section>
-
-      <section className="panel" aria-label="Recent check-ins">
-        <p className="panel-title">Recent honesty</p>
-        {checkIns.length === 0 ? (
-          <p className="panel-help">No check-ins yet. The first cadence will ask.</p>
-        ) : (
-          <ul className="history">
-            {checkIns.slice(0, 8).map((item) => (
-              <li key={item.id}>
-                <span className={`tag ${item.status}`}>{statusLabel(item.status)}</span>
-                <span>
-                  {new Date(item.createdAt).toLocaleTimeString([], {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                  {item.note ? ` · ${item.note}` : ""}
-                </span>
+          <ul className="commitment-list">
+            {commitments.map((item) => (
+              <li key={item.id} className={item.done ? "done" : ""}>
+                <button type="button" className="check" onClick={() => toggleDone(item.id)} aria-label="Toggle done">
+                  <span />
+                </button>
+                <span className="title">{item.title}</span>
+                <button type="button" className="ghost" onClick={() => removeCommitment(item.id)}>
+                  Remove
+                </button>
               </li>
             ))}
           </ul>
-        )}
-      </section>
 
-      <section className="panel" aria-label="Account">
-        <p className="panel-title">Sync with Supabase</p>
-        {userEmail ? (
-          <>
-            <p className="panel-help">Signed in as {userEmail}</p>
-            <button type="button" className="say compact" onClick={() => void signOut()}>
-              Sign out
-            </button>
-          </>
-        ) : (
-          <form className="add-form" onSubmit={signIn}>
+          {commitments.length === 0 ? <p className="empty">No commitments yet. Add up to three.</p> : null}
+
+          {commitments.length < 3 ? (
+            <form className="inline-form" onSubmit={addCommitment}>
+              <input
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                placeholder="Write one clear outcome"
+                maxLength={120}
+              />
+              <button type="submit" className="primary compact">
+                Add
+              </button>
+            </form>
+          ) : null}
+
+          <div className="history-block">
+            <p className="eyebrow">Recent honesty</p>
+            {checkIns.length === 0 ? (
+              <p className="empty">No check-ins yet.</p>
+            ) : (
+              <ul className="history">
+                {checkIns.slice(0, 6).map((item) => (
+                  <li key={item.id}>
+                    <span className={`tag ${item.status}`}>{statusLabel(item.status)}</span>
+                    <span>
+                      {new Date(item.createdAt).toLocaleTimeString([], {
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })}
+                      {item.note ? ` · ${item.note}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {view === "you" ? (
+        <section className="screen" aria-label="You">
+          <header className="screen-head">
+            <p className="eyebrow">You</p>
+            <h1 className="screen-title">{greetingName || "Your Hold"}</h1>
+          </header>
+
+          <label className="field">
+            <span>Name</span>
             <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@email.com"
-              required
+              value={nameDraft}
+              onChange={(event) => setNameDraft(event.target.value)}
+              onBlur={() => setProfile((prev) => ({ ...prev, name: nameDraft.trim() }))}
+              placeholder="Your name"
+              maxLength={40}
             />
-            <button type="submit" className="say compact">
-              Magic link
-            </button>
-          </form>
-        )}
-        {authMessage ? <p className="panel-help">{authMessage}</p> : null}
-        {!supabaseReady ? (
-          <p className="panel-help">
-            Local mode is on. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` to sync across devices.
-          </p>
-        ) : null}
-      </section>
+          </label>
 
-      <p className="footnote">
-        Keep this tab open for spoken holds. Annoying mode also uses browser notifications when allowed.
-      </p>
+          <div className="stack">
+            <div className="row">
+              <div>
+                <p className="row-title">Spoken cadence</p>
+                <p className="row-help">Hold speaks on a schedule.</p>
+              </div>
+              <button
+                type="button"
+                className="switch"
+                role="switch"
+                aria-checked={settings.enabled}
+                aria-label="Spoken cadence"
+                onClick={() => updateSettings({ enabled: !settings.enabled })}
+              >
+                <span className="knob" />
+              </button>
+            </div>
+
+            <label className="field">
+              <span>How often</span>
+              <select
+                value={settings.cadence}
+                onChange={(event) => updateSettings({ cadence: event.target.value as Cadence })}
+              >
+                <option value="half">Every half hour</option>
+                <option value="quarter">Every quarter hour</option>
+                <option value="off">Only when I ask</option>
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Intensity</span>
+              <select
+                value={settings.intensity}
+                onChange={(event) => {
+                  const value = event.target.value as Intensity;
+                  if (value === "annoying") void enableAnnoyingExtras();
+                  else updateSettings({ intensity: value });
+                }}
+              >
+                <option value="gentle">Gentle</option>
+                <option value="annoying">Annoying</option>
+              </select>
+            </label>
+
+            <label className="check-line">
+              <input
+                type="checkbox"
+                checked={settings.includePeriod}
+                onChange={(event) => updateSettings({ includePeriod: event.target.checked })}
+              />
+              <span>Say morning / afternoon / evening / night</span>
+            </label>
+          </div>
+
+          <div className="account-block">
+            <p className="eyebrow">Sign in</p>
+            <p className="empty">Optional. Use your name and email when you want an account.</p>
+            {userEmail ? (
+              <div className="signed-in">
+                <p className="empty">Signed in as {userEmail}</p>
+                <button type="button" className="ghost-btn" onClick={() => void signOut()}>
+                  Sign out
+                </button>
+              </div>
+            ) : (
+              <form className="stack-form" onSubmit={signIn}>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="Email"
+                  required
+                />
+                <button type="submit" className="primary">
+                  Email me a sign-in link
+                </button>
+              </form>
+            )}
+            {authMessage ? <p className="empty">{authMessage}</p> : null}
+          </div>
+
+          <button type="button" className="text-link" onClick={() => setView("welcome")}>
+            Show welcome screen again
+          </button>
+        </section>
+      ) : null}
+
+      <nav className="dock" aria-label="Main">
+        <button type="button" className={view === "home" ? "active" : ""} onClick={() => setView("home")}>
+          Hold
+        </button>
+        <button type="button" className={view === "today" ? "active" : ""} onClick={() => setView("today")}>
+          Today
+        </button>
+        <button type="button" className={view === "you" ? "active" : ""} onClick={() => setView("you")}>
+          You
+        </button>
+      </nav>
     </div>
   );
 }

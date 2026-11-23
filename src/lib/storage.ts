@@ -4,6 +4,12 @@ import { todayKey } from "./time";
 const SETTINGS_KEY = "hold.settings";
 const COMMITMENTS_KEY = "hold.commitments";
 const CHECKINS_KEY = "hold.checkins";
+const PROFILE_KEY = "hold.profile";
+
+export type Profile = {
+  name: string;
+  welcomeSeen: boolean;
+};
 
 function readJson<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -55,4 +61,16 @@ export function newId() {
     return crypto.randomUUID();
   }
   return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function loadProfile(): Profile {
+  return {
+    name: "",
+    welcomeSeen: false,
+    ...readJson<Partial<Profile>>(PROFILE_KEY, {}),
+  };
+}
+
+export function saveProfile(profile: Profile) {
+  writeJson(PROFILE_KEY, profile);
 }

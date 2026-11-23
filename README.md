@@ -26,14 +26,16 @@ Without Supabase keys, Hold runs in **local mode** (settings, commitments, and c
 
 ## Supabase setup
 
+Supabase is for **optional sign-in** (name + email magic link), not a “sync box” in the UI.
+
 1. Create a project at [supabase.com](https://supabase.com).
-2. Put the project URL and anon key in `.env.local`.
+2. Put the project URL and anon key in `.env.local` (never put the database password in `NEXT_PUBLIC_*` vars).
 3. Run `supabase/schema.sql` in the Supabase SQL editor.
 4. Under Authentication → URL configuration, add:
    - Site URL: `http://localhost:3000` (and your Vercel URL later)
    - Redirect URL: `http://localhost:3000/auth/callback`
 
-Magic-link sign-in is ready after that.
+On **You**, people can save a name and optionally email themselves a sign-in link.
 
 ## Deploy on Vercel
 
