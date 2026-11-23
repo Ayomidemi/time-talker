@@ -14,35 +14,55 @@ export function TodayScreen() {
         <h1 className="screen-title">What are you holding?</h1>
       </header>
 
+      {hold.commitmentsLoading ? <p className="empty" role="status">Loading commitments…</p> : null}
+      {hold.commitmentsSaving ? <p className="empty" role="status">Saving…</p> : null}
+      {hold.commitmentsError ? (
+        <div role="alert">
+          <p className="error">{hold.commitmentsError}</p>
+          <button type="button" className="text-link" disabled={hold.commitmentsSaving} onClick={hold.retryCommitments}>Reload commitments</button>
+        </div>
+      ) : null}
       <ul className="commitment-list">
         {hold.commitments.map((item) => (
           <li key={item.id} className={item.done ? "done" : ""}>
-            <button type="button" className="check" onClick={() => hold.toggleDone(item.id)} aria-label="Toggle done">
+            <button type="button" className="check" disabled={hold.commitmentsLoading || hold.commitmentsSaving} onClick={() => hold.toggleDone(item.id)} aria-label="Toggle done">
               <span />
             </button>
-            <span className="title">{item.title}</span>
-            <button type="button" className="ghost" onClick={() => hold.removeCommitment(item.id)}>
+            <div className="title">
+              <span>{item.title}</span>
+              {item.dueAt ? <small className="commitment-deadline">Due {new Date(item.dueAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</small> : null}
+            </div>
+            <button type="button" className="ghost" disabled={hold.commitmentsLoading || hold.commitmentsSaving} onClick={() => hold.removeCommitment(item.id)}>
               Remove
             </button>
           </li>
         ))}
       </ul>
 
-      {hold.commitments.length === 0 ? <p className="empty">No commitments yet. Add up to three.</p> : null}
+      {!hold.commitmentsLoading && !hold.commitmentsError && hold.commitments.length === 0 ? <p className="empty">No commitments yet. Add an outcome below.</p> : null}
 
-      {hold.commitments.length < 3 ? (
-        <form className="inline-form" onSubmit={hold.addCommitment}>
+        <form className="stack-form" onSubmit={(event) => void hold.addCommitment(event)}>
           <input
+            disabled={hold.commitmentsLoading || hold.commitmentsSaving || Boolean(hold.commitmentsError)}
             value={hold.draft}
             onChange={(event) => hold.setDraft(event.target.value)}
+            aria-label="Commitment"
             placeholder="Write one clear outcome"
             maxLength={120}
           />
-          <button type="submit" className="primary compact">
+          <label className="field">
+            <span>Deadline (optional)</span>
+            <input
+              type="datetime-local"
+              value={hold.deadlineDraft}
+              onChange={(event) => hold.setDeadlineDraft(event.target.value)}
+              disabled={hold.commitmentsLoading || hold.commitmentsSaving || Boolean(hold.commitmentsError)}
+            />
+          </label>
+          <button type="submit" className="primary compact" disabled={hold.commitmentsLoading || hold.commitmentsSaving || Boolean(hold.commitmentsError) || !hold.draft.trim()}>
             Add
           </button>
         </form>
-      ) : null}
 
       <div className="history-block">
         <p className="eyebrow">Recent honesty</p>

@@ -638,3 +638,10 @@ a.ghost-btn {
     animation: none;
   }
 }
+
+.commitment-deadline {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-top: 4px;
+}

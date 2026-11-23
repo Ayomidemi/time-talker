@@ -61,7 +61,7 @@ export default function LoginPage() {
           ? "Enter your email to find your account, or skip to get started."
           : email.trim()
             ? "Add your name to create your account."
-            : "Your name and activity will be saved in this browser."}
+            : ""}
       </p>
       <form className="welcome-form" onSubmit={(event) => void onSubmit(event)}>
         {step === "email" ? (

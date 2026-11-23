@@ -14,12 +14,13 @@ export function YouScreen() {
         <h1 className="screen-title">{hold.greetingName || "Your Hold"}</h1>
       </header>
 
+      <form className="stack-form" onSubmit={(event) => void hold.saveAccountDetails(event)}>
       <label className="field">
         <span>Name</span>
         <input
           value={hold.nameDraft}
           onChange={(event) => hold.setNameDraft(event.target.value)}
-          onBlur={hold.saveName}
+          disabled={hold.authLoading}
           placeholder="Your name"
           maxLength={40}
           required
@@ -33,17 +34,16 @@ export function YouScreen() {
           value={hold.lockedEmail ? hold.userEmail || hold.profile.email : hold.emailDraft}
           onChange={(event) => hold.setEmailDraft(event.target.value)}
           placeholder="Optional"
-          maxLength={120}
-          disabled={hold.lockedEmail}
+          maxLength={254}
+          disabled={hold.lockedEmail || hold.authLoading}
         />
       </label>
-      {hold.showSaveEmail ? (
-        <form className="stack-form" onSubmit={(event) => void hold.saveAccountEmail(event)}>
+      {hold.showSaveAccount ? (
           <button type="submit" className="primary" disabled={hold.authLoading}>
-            {hold.authLoading ? "Loading…" : "Save account details"}
+            {hold.authLoading ? "Saving…" : "Save account details"}
           </button>
-        </form>
       ) : null}
+      </form>
       {hold.authMessage ? <p className="empty">{hold.authMessage}</p> : null}
 
       <div className="stack">

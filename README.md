@@ -28,7 +28,7 @@ Without Supabase keys, Hold runs in **local mode** (settings, commitments, and c
 
 Start with an optional email. Skip it to enter a name and use Hold locally. An existing email opens Hold with its saved name; a new email asks for a name and creates a profile. No email verification is sent.
 
-Email profiles are intentionally unverified, so anyone with an email can retrieve its saved name. They do not create a Supabase Auth session or grant access to private authenticated data. Settings, commitments, and check-ins remain in this browser for both guests and email profiles; they do not sync across devices.
+Email profiles are intentionally unverified, so anyone with an email can retrieve its saved name. They do not create a Supabase Auth session or grant access to private authenticated data. Settings and check-ins remain in this browser. Guest commitments stay local; email profiles save commitments in Supabase by email and day. With the chosen email-only entry, anyone who enters an email can access that profile and its commitments.
 
 1. Create a project at [supabase.com](https://supabase.com).
 2. Put the project URL and anon key in `.env.local` (never put the database password in `NEXT_PUBLIC_*` vars).
@@ -41,7 +41,13 @@ To apply the migration in the Supabase dashboard:
 3. Click **Run**. It is safe to rerun this migration; it does not overwrite existing names.
 4. Refresh Hold and try a new email, then log out and enter the same email again. The second visit should skip name entry.
 
-On **You**, guests can add an email to create or open an email profile.
+For display-name editing and cloud commitments, also run `supabase/migrations/20261123_profile_commitments.sql` in a new SQL Editor query after the email accounts migration. New installations using `schema.sql` already include both.
+
+On **You**, name and email edits use a single **Save account details** button. Name-only edits update the existing profile; adding an email creates or opens that email profile. Guests can add an email to create or open a profile. Signed-in users load today's commitments from Supabase, and additions, completion changes, and removals save there. Existing guest/browser-only commitments are not automatically copied to an email profile.
+
+Logout clears browser data and stops timers; Supabase profile names and commitments remain available when signing in again.
+
+For unlimited commitments and optional deadlines, also run `supabase/migrations/20261123_commitment_deadlines.sql` after the profile commitments migration. Deadlines use your browser’s local date/time and are stored as UTC instants. Deadlines are displayed with each commitment; they do not schedule additional notifications.
 
 ## Checks
 
@@ -61,13 +67,13 @@ Manrope and Syne are bundled in `public/fonts` with their license, so builds do 
 
 - Half-hour or quarter-hour spoken cadence
 - Gentle vs annoying intensity
-- Today’s commitments (up to 3)
+- Unlimited daily commitments with optional deadlines
 - Check-in logging + recent honesty list
 - PWA manifest for “Add to Home Screen”
 - Optional email-only profiles with a local guest mode
 
 ## What’s next
 
-- Sync commitments/check-ins to Supabase when signed in
+- Sync check-ins to Supabase when signed in
 - Web Push so annoying mode works after the tab is closed
 - End-of-day spoken review

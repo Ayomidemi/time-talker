@@ -1,9 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useRouter } from "next/navigation";
 import { createContext, useContext } from "react";
-import { enterAccount, logoutAccount } from "@/lib/account-client";
+import { logoutAccount, saveAccountChanges } from "@/lib/account-client";
+import { accountCommitments, type CommitmentChange } from "@/lib/commitments-client";
 import { broadcastLogout, clearBrowserData, LOGOUT_CHANNEL } from "@/lib/logout";
 import { checkInPrompt } from "@/lib/prompts";
 import { ensureNotificationPermission, notify, speak, stopSpeech } from "@/lib/speech";
@@ -49,9 +49,15 @@ type HoldContextValue = {
   settings: Settings;
   profile: Profile;
   commitments: Commitment[];
+  commitmentsLoading: boolean;
+  commitmentsSaving: boolean;
+  commitmentsError: string | null;
+  retryCommitments: () => void;
   checkIns: CheckIn[];
   draft: string;
   setDraft: (value: string) => void;
+  deadlineDraft: string;
+  setDeadlineDraft: (value: string) => void;
   nameDraft: string;
   setNameDraft: (value: string) => void;
   emailDraft: string;
@@ -73,17 +79,16 @@ type HoldContextValue = {
   greetingName: string;
   openCommitments: Commitment[];
   lockedEmail: boolean;
-  showSaveEmail: boolean;
+  showSaveAccount: boolean;
   updateSettings: (partial: Partial<Settings>) => void;
   addCommitment: (event: FormEvent) => void;
   toggleDone: (id: string) => void;
   removeCommitment: (id: string) => void;
   recordCheckIn: (status: CheckInStatus) => void;
   speakNow: () => Promise<void>;
-  saveAccountEmail: (event: FormEvent) => Promise<void>;
+  saveAccountDetails: (event: FormEvent) => Promise<void>;
   enableAnnoyingExtras: () => Promise<void>;
   logout: () => Promise<void>;
-  saveName: () => void;
 };
 
 const HoldContext = createContext<HoldContextValue | null>(null);
@@ -106,14 +111,26 @@ export function HoldProvider({ children }: { children: React.ReactNode }) {
 }
 
 function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; hydrated: boolean }) {
-  const router = useRouter();
   const [now, setNow] = useState<Date | null>(() => hydrated ? new Date() : null);
   const [settings, setSettings] = useState<Settings>(() => hydrated ? loadSettings() : DEFAULT_SETTINGS);
   const [profile, setProfile] = useState<Profile>(() => hydrated ? loadProfile() : { name: "", email: "", welcomeSeen: false, emailPending: false });
   const [commitmentDay, setCommitmentDay] = useState(() => hydrated ? todayKey() : "");
-  const [commitments, setCommitments] = useState<Commitment[]>(() => hydrated ? loadCommitments() : []);
+  const commitmentScope = `${profile.email}|${commitmentDay}`;
+  const [commitmentView, setCommitmentView] = useState<{ scope: string; items: Commitment[]; ready: boolean; saving: boolean; error: string | null }>(() => ({
+    scope: commitmentScope, items: hydrated && !profile.email ? loadCommitments() : [],
+    ready: hydrated && !profile.email, saving: false, error: null,
+  }));
+  const [reloadCommitments, setReloadCommitments] = useState(0);
+  const commitments = commitmentView.scope === commitmentScope ? commitmentView.items : [];
+  const commitmentsError = commitmentView.scope === commitmentScope ? commitmentView.error : null;
+  const commitmentsLoading = commitmentView.scope !== commitmentScope || (!commitmentView.ready && !commitmentsError);
+  const commitmentsSaving = commitmentView.scope === commitmentScope && commitmentView.saving;
+  const commitmentsRequestRef = useRef<AbortController | null>(null);
+  const commitmentMutationRef = useRef(false);
+  const nameRequestRef = useRef<AbortController | null>(null);
   const [checkIns, setCheckIns] = useState<CheckIn[]>(() => hydrated ? loadCheckIns() : []);
   const [draft, setDraft] = useState("");
+  const [deadlineDraft, setDeadlineDraft] = useState("");
   const [nameDraft, setNameDraft] = useState(profile.name);
   const [emailDraft, setEmailDraft] = useState(profile.email);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
@@ -136,8 +153,33 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
   }, [settings, hydrated]);
 
   useEffect(() => {
-    if (hydrated && !loggingOutRef.current) saveCommitmentsForDay(commitmentDay, commitments);
-  }, [commitmentDay, commitments, hydrated]);
+    if (!hydrated) return;
+    const controller = new AbortController();
+    commitmentsRequestRef.current = controller;
+    commitmentMutationRef.current = false;
+    Promise.resolve().then(async () => {
+      const items = profile.email
+        ? await accountCommitments(commitmentDay, controller.signal)
+        : loadCommitments(commitmentDay);
+      if (!controller.signal.aborted && !loggingOutRef.current) {
+        setCommitmentView({ scope: commitmentScope, items, ready: true, saving: false, error: null });
+      }
+    }).catch((err) => {
+      if (!controller.signal.aborted && !loggingOutRef.current) {
+        setCommitmentView({ scope: commitmentScope, items: [], ready: false, saving: false,
+          error: err instanceof Error ? err.message : "Couldn’t load commitments." });
+      }
+    });
+    return () => controller.abort();
+  }, [hydrated, profile.email, commitmentDay, commitmentScope, reloadCommitments]);
+
+  useEffect(() => () => { nameRequestRef.current?.abort(); }, []);
+
+  function retryCommitments() {
+    if (commitmentMutationRef.current || loggingOutRef.current) return;
+    setCommitmentView((prev) => ({ ...prev, ready: false, error: null }));
+    setReloadCommitments((value) => value + 1);
+  }
 
   useEffect(() => {
     if (hydrated && !loggingOutRef.current) saveProfile(profile);
@@ -187,7 +229,6 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     const day = todayKey(current);
     if (day !== commitmentDay) {
       setCommitmentDay(day);
-      setCommitments(loadCommitments(day));
     }
     if (!settings.enabled || settings.cadence === "off") return;
     const boundary = lastBoundary(current, settings.cadence);
@@ -227,6 +268,8 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
   async function logout(broadcast = true) {
     if (loggingOutRef.current) return;
     loggingOutRef.current = true;
+    commitmentsRequestRef.current?.abort();
+    nameRequestRef.current?.abort();
     setLoggingOut(true);
     if (clockTimerRef.current !== null) window.clearInterval(clockTimerRef.current);
     stopSpeech();
@@ -258,31 +301,59 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     };
   }, [hydrated]);
 
-  function addCommitment(event: FormEvent) {
+  async function changeCommitment(change: CommitmentChange) {
+    const controller = commitmentsRequestRef.current;
+    if (loggingOutRef.current || !controller || controller.signal.aborted || commitmentMutationRef.current
+      || !commitmentView.ready || commitmentView.scope !== commitmentScope) return false;
+    commitmentMutationRef.current = true;
+    setCommitmentView((prev) => ({ ...prev, saving: true, error: null }));
+    try {
+      let items: Commitment[];
+      if (profile.email) {
+        items = await accountCommitments(commitmentDay, controller.signal, change);
+      } else {
+        items = commitments;
+        if (change.operation === "add") {
+          items = [...items, { id: change.id, title: change.title!, done: false, day: commitmentDay, dueAt: change.dueAt ?? null, createdAt: new Date().toISOString() }];
+        } else if (change.operation === "update") {
+          items = items.map((item) => item.id === change.id ? { ...item, done: change.done! } : item);
+        } else {
+          items = items.filter((item) => item.id !== change.id);
+        }
+        saveCommitmentsForDay(commitmentDay, items);
+      }
+      if (controller.signal.aborted || loggingOutRef.current) return false;
+      setCommitmentView({ scope: commitmentScope, items, ready: true, saving: false, error: null });
+      return true;
+    } catch (err) {
+      if (!controller.signal.aborted && !loggingOutRef.current) {
+        setCommitmentView((prev) => ({ ...prev, saving: false, error: err instanceof Error ? err.message : "Couldn’t save commitment." }));
+      }
+      return false;
+    } finally {
+      if (!controller.signal.aborted) commitmentMutationRef.current = false;
+    }
+  }
+
+  async function addCommitment(event: FormEvent) {
     event.preventDefault();
-    if (loggingOutRef.current) return;
     const title = draft.trim();
-    if (!title) return;
-    setCommitments((prev) => [
-      ...prev,
-      {
-        id: newId(),
-        title,
-        done: false,
-        day: todayKey(),
-        dueAt: null,
-        createdAt: new Date().toISOString(),
-      },
-    ]);
-    setDraft("");
+    if (!title || title.length > 120 || loggingOutRef.current) return;
+    const deadline = deadlineDraft ? new Date(deadlineDraft) : null;
+    if (deadline && Number.isNaN(deadline.getTime())) return;
+    if (await changeCommitment({ operation: "add", id: newId(), title, dueAt: deadline?.toISOString() ?? null })) {
+      setDraft("");
+      setDeadlineDraft("");
+    }
   }
 
   function toggleDone(id: string) {
-    setCommitments((prev) => prev.map((item) => (item.id === id ? { ...item, done: !item.done } : item)));
+    const item = commitments.find((item) => item.id === id);
+    if (item) void changeCommitment({ operation: "update", id, done: !item.done });
   }
 
   function removeCommitment(id: string) {
-    setCommitments((prev) => prev.filter((item) => item.id !== id));
+    void changeCommitment({ operation: "delete", id });
   }
 
   function recordCheckIn(status: CheckInStatus) {
@@ -306,28 +377,27 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     await announce(`${lead}${text}`);
   }
 
-  async function saveAccountEmail(event: FormEvent) {
+  async function saveAccountDetails(event: FormEvent) {
     event.preventDefault();
-    if (loggingOutRef.current) return;
-    const name = nameDraft.trim() || profile.name.trim();
-    const email = emailDraft.trim();
-    if (!name || !email) return;
+    if (loggingOutRef.current || authLoading) return;
+    nameRequestRef.current?.abort();
+    const controller = new AbortController();
+    nameRequestRef.current = controller;
     setAuthLoading(true);
     setAuthMessage(null);
     try {
-      const result = await enterAccount({ name, email });
-      if (loggingOutRef.current) return;
-      if (result.needsName) throw new Error("Name is required.");
-      const next = { name: result.name, email: result.email, welcomeSeen: true, emailPending: false };
-      setNameDraft(result.name);
-      setEmailDraft(result.email);
+      const saved = await saveAccountChanges(profile, { name: nameDraft, email: emailDraft }, controller.signal);
+      if (controller.signal.aborted || loggingOutRef.current) return;
+      const next = { ...saved, welcomeSeen: true, emailPending: false };
+      setNameDraft(saved.name);
+      setEmailDraft(saved.email);
       setProfile(next);
       saveProfile(next);
-      router.push(result.next);
+      setAuthMessage("Account details saved.");
     } catch (err) {
-      setAuthMessage(err instanceof Error ? err.message : "Couldn’t save that email.");
+      if (!controller.signal.aborted && !loggingOutRef.current) setAuthMessage(err instanceof Error ? err.message : "Couldn’t save account details.");
     } finally {
-      setAuthLoading(false);
+      if (!controller.signal.aborted && !loggingOutRef.current) setAuthLoading(false);
     }
   }
 
@@ -338,18 +408,6 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     updateSettings({ intensity: "annoying" });
   }
 
-  function saveName() {
-    if (loggingOutRef.current) return;
-    const name = nameDraft.trim();
-    if (!name) {
-      setAuthMessage("Name is required.");
-      setNameDraft(profile.name);
-      return;
-    }
-    setAuthMessage(null);
-    setProfile((prev) => ({ ...prev, name, welcomeSeen: true }));
-  }
-
   const untilLabel =
     !settings.enabled || settings.cadence === "off"
       ? "Cadence is off"
@@ -358,16 +416,22 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
         : "Starting…";
 
   const lockedEmail = Boolean(userEmail || (profile.email.trim() && !profile.emailPending));
-  const showSaveEmail = !lockedEmail && emailDraft.trim().length > 0 && emailDraft.trim() !== profile.email.trim();
+  const showSaveAccount = nameDraft.trim() !== profile.name || (!lockedEmail && emailDraft.trim().toLowerCase() !== profile.email);
 
   const value: HoldContextValue = {
     now,
     settings,
     profile,
     commitments,
+    commitmentsLoading,
+    commitmentsSaving,
+    commitmentsError,
+    retryCommitments,
     checkIns,
     draft,
     setDraft,
+    deadlineDraft,
+    setDeadlineDraft,
     nameDraft,
     setNameDraft,
     emailDraft,
@@ -389,17 +453,16 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     greetingName,
     openCommitments,
     lockedEmail,
-    showSaveEmail,
+    showSaveAccount,
     updateSettings,
     addCommitment,
     toggleDone,
     removeCommitment,
     recordCheckIn,
     speakNow,
-    saveAccountEmail,
+    saveAccountDetails,
     enableAnnoyingExtras,
     logout,
-    saveName,
   };
 
   return <HoldContext.Provider value={value}>{loggingOut ? <div className="boot">Signing out…</div> : children}</HoldContext.Provider>;
