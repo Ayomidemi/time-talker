@@ -1,8 +1,11 @@
 import type { CheckInStatus, Commitment, Intensity } from "./types";
 
+function openFocus(commitments: Commitment[]) {
+  return commitments.find((item) => !item.done)?.title;
+}
+
 export function checkInPrompt(commitments: Commitment[], intensity: Intensity) {
-  const open = commitments.filter((item) => !item.done);
-  const focus = open[0]?.title;
+  const focus = openFocus(commitments);
 
   if (intensity === "annoying") {
     if (focus) {
@@ -15,6 +18,15 @@ export function checkInPrompt(commitments: Commitment[], intensity: Intensity) {
     return `Quick check. Still on ${focus}?`;
   }
   return "Quick check. How are you holding?";
+}
+
+/** Short line for speechSynthesis — keeps the commitment name audible. */
+export function spokenCheckInPrompt(commitments: Commitment[], intensity: Intensity) {
+  const focus = openFocus(commitments);
+  if (intensity === "annoying") {
+    return focus ? `Check in now. Are you still holding ${focus}?` : "Check in now.";
+  }
+  return focus ? `Quick check. Still on ${focus}?` : "Quick check. How are you holding?";
 }
 
 export function statusLabel(status: CheckInStatus) {

@@ -5,7 +5,7 @@ import { createContext, useContext } from "react";
 import { logoutAccount, saveAccountChanges } from "@/lib/account-client";
 import { accountCommitments, type CommitmentChange } from "@/lib/commitments-client";
 import { broadcastLogout, clearBrowserData, LOGOUT_CHANNEL } from "@/lib/logout";
-import { checkInPrompt } from "@/lib/prompts";
+import { checkInPrompt, spokenCheckInPrompt } from "@/lib/prompts";
 import { ensureNotificationPermission, notify, speak, stopSpeech } from "@/lib/speech";
 import {
   appendCheckIn,
@@ -23,6 +23,7 @@ import {
   formatClock,
   formatWait,
   formatWhen,
+  intervalMinutes,
   intervalProgress,
   lastBoundary,
   nextAnnouncement,
@@ -43,6 +44,15 @@ const RADIUS = 54;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 const GENTLE_NUDGE_MS = 30 * 60 * 1000;
 const ANNOYING_NUDGE_MS = 10 * 60 * 1000;
+const SLOT_ANNOUNCE_WINDOW_MS = 45_000;
+
+function nudgeGapMs(intensity: Settings["intensity"], cadence: Cadence) {
+  const configured = intensity === "annoying" ? ANNOYING_NUDGE_MS : GENTLE_NUDGE_MS;
+  if (cadence === "off") return configured;
+  // Keep at least one spoken reminder inside the current cadence window.
+  const beforeNextSlot = intervalMinutes(cadence) * 60_000 - 60_000;
+  return Math.max(60_000, Math.min(configured, beforeNextSlot));
+}
 
 type HoldContextValue = {
   now: Date | null;
@@ -222,6 +232,15 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     await announce(text);
   }
 
+  function beginPendingSlot(boundary: Date) {
+    const key = slotKey(boundary);
+    if (announcedRef.current === key || pendingSlot === key) return;
+    announcedRef.current = key;
+    setPendingSlot(key);
+    // Start the nudge clock so the first reminder can arrive inside this interval.
+    lastNudgeRef.current = Date.now() - nudgeGapMs(settings.intensity, settings.cadence) + 15_000;
+  }
+
   const onClockTick = useEffectEvent(() => {
     if (loggingOutRef.current) return;
     const current = new Date();
@@ -234,19 +253,22 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     const boundary = lastBoundary(current, settings.cadence);
     if (boundary) {
       const late = current.getTime() - boundary.getTime();
-      if (late >= 0 && late < 45_000) void fireSlot(boundary);
+      const intervalMs = intervalMinutes(settings.cadence) * 60_000;
+      if (late >= 0 && late < SLOT_ANNOUNCE_WINDOW_MS) {
+        void fireSlot(boundary);
+      } else if (late >= SLOT_ANNOUNCE_WINDOW_MS && late < intervalMs) {
+        // Arrived mid-interval: still open the check-in window without replaying the time.
+        beginPendingSlot(boundary);
+      }
     }
     if (!pendingSlot) return;
-    const gap = settings.intensity === "annoying" ? ANNOYING_NUDGE_MS : GENTLE_NUDGE_MS;
+    const gap = nudgeGapMs(settings.intensity, settings.cadence);
     if (Date.now() - lastNudgeRef.current < gap) return;
     lastNudgeRef.current = Date.now();
     const prompt = checkInPrompt(commitments, settings.intensity);
-    if (settings.intensity === "annoying") {
-      notify("Hold — still waiting", prompt);
-      void announce("Check in now.");
-    } else {
-      notify("Hold", prompt);
-    }
+    const spoken = spokenCheckInPrompt(commitments, settings.intensity);
+    notify(settings.intensity === "annoying" ? "Hold — still waiting" : "Hold", prompt);
+    void announce(spoken);
   });
 
   useEffect(() => {
