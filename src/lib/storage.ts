@@ -1,3 +1,4 @@
+import { clearCookie, readCookie, writeCookie } from "./cookies";
 import { DEFAULT_SETTINGS, type CheckIn, type Commitment, type Settings } from "./types";
 import { todayKey } from "./time";
 
@@ -5,10 +6,14 @@ const SETTINGS_KEY = "hold.settings";
 const COMMITMENTS_KEY = "hold.commitments";
 const CHECKINS_KEY = "hold.checkins";
 const PROFILE_KEY = "hold.profile";
+const NAME_COOKIE = "hold_name";
+const EMAIL_COOKIE = "hold_email";
 
 export type Profile = {
   name: string;
+  email: string;
   welcomeSeen: boolean;
+  emailPending: boolean;
 };
 
 function readJson<T>(key: string, fallback: T): T {
@@ -64,13 +69,27 @@ export function newId() {
 }
 
 export function loadProfile(): Profile {
+  const legacy = readJson<Partial<Profile>>(PROFILE_KEY, {});
+  const name = readCookie(NAME_COOKIE) || legacy.name || "";
+  const email = readCookie(EMAIL_COOKIE) || legacy.email || "";
   return {
-    name: "",
-    welcomeSeen: false,
-    ...readJson<Partial<Profile>>(PROFILE_KEY, {}),
+    name,
+    email,
+    welcomeSeen: Boolean(name) || Boolean(legacy.welcomeSeen),
+    emailPending: Boolean(legacy.emailPending),
   };
 }
 
 export function saveProfile(profile: Profile) {
   writeJson(PROFILE_KEY, profile);
+  if (profile.name.trim()) writeCookie(NAME_COOKIE, profile.name.trim());
+  else clearCookie(NAME_COOKIE);
+  if (profile.email.trim()) writeCookie(EMAIL_COOKIE, profile.email.trim());
+  else clearCookie(EMAIL_COOKIE);
+}
+
+export function clearProfile() {
+  writeJson(PROFILE_KEY, { name: "", email: "", welcomeSeen: false, emailPending: false });
+  clearCookie(NAME_COOKIE);
+  clearCookie(EMAIL_COOKIE);
 }

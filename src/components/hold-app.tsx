@@ -5,6 +5,7 @@ import { checkInPrompt, statusLabel } from "@/lib/prompts";
 import { ensureNotificationPermission, notify, speak } from "@/lib/speech";
 import {
   appendCheckIn,
+  clearProfile,
   loadCheckIns,
   loadCommitments,
   loadProfile,
@@ -37,7 +38,7 @@ import {
   type Settings,
 } from "@/lib/types";
 
-type View = "welcome" | "home" | "today" | "you";
+type View = "welcome" | "confirm-email" | "home" | "today" | "you";
 
 const RADIUS = 54;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
@@ -48,15 +49,23 @@ export function HoldApp() {
   const [view, setView] = useState<View>("home");
   const [now, setNow] = useState<Date | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [profile, setProfile] = useState<Profile>({ name: "", welcomeSeen: false });
+  const [profile, setProfile] = useState<Profile>({
+    name: "",
+    email: "",
+    welcomeSeen: false,
+    emailPending: false,
+  });
   const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
   const [draft, setDraft] = useState("");
   const [nameDraft, setNameDraft] = useState("");
-  const [email, setEmail] = useState("");
+  const [emailDraft, setEmailDraft] = useState("");
+  const [welcomeError, setWelcomeError] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [pendingSlot, setPendingSlot] = useState<string | null>(null);
+  const [lastCheckIn, setLastCheckIn] = useState<CheckInStatus | null>(null);
   const [lastPhrase, setLastPhrase] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,11 +79,19 @@ export function HoldApp() {
     const savedProfile = loadProfile();
     setProfile(savedProfile);
     setNameDraft(savedProfile.name);
+    setEmailDraft(savedProfile.email);
     setCommitments(loadCommitments());
     setCheckIns(loadCheckIns());
     setSettings(loadSettings());
     setNow(new Date());
-    setView(savedProfile.welcomeSeen ? "home" : "welcome");
+    setCheckIns((prev) => {
+      const loaded = loadCheckIns();
+      if (loaded[0]) setLastCheckIn(loaded[0].status);
+      return loaded;
+    });
+    if (!savedProfile.name.trim()) setView("welcome");
+    else if (savedProfile.emailPending) setView("confirm-email");
+    else setView("home");
     setHydrated(true);
     const id = window.setInterval(() => setNow(new Date()), 250);
     return () => window.clearInterval(id);
@@ -88,11 +105,17 @@ export function HoldApp() {
       const metaName = data.user?.user_metadata?.name;
       if (typeof metaName === "string" && metaName.trim()) {
         setProfile((prev) => {
-          const next = { ...prev, name: metaName.trim(), welcomeSeen: true };
+          const next = {
+            ...prev,
+            name: metaName.trim(),
+            email: data.user?.email ?? prev.email,
+            welcomeSeen: true,
+          };
           saveProfile(next);
           return next;
         });
         setNameDraft(metaName.trim());
+        if (data.user?.email) setEmailDraft(data.user.email);
       }
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -183,11 +206,49 @@ export function HoldApp() {
     setSettings((prev) => ({ ...prev, ...partial }));
   }
 
-  function finishWelcome(event?: FormEvent) {
-    event?.preventDefault();
+  async function finishWelcome(event: FormEvent) {
+    event.preventDefault();
     const name = nameDraft.trim();
-    setProfile({ name, welcomeSeen: true });
+    const email = emailDraft.trim();
+    if (!name) {
+      setWelcomeError("Name is required.");
+      return;
+    }
+
+    const nextProfile: Profile = { name, email, welcomeSeen: true };
+    setProfile(nextProfile);
+    saveProfile(nextProfile);
+    setWelcomeError(null);
+
+    if (email && supabaseReady) {
+      setAuthMessage("Sending a sign-in link…");
+      const supabase = createClient();
+      const { error: authError } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          data: { name },
+        },
+      });
+      setAuthMessage(authError ? authError.message : "Check your email for a sign-in link.");
+    }
+
     setView("home");
+  }
+
+  async function logout() {
+    clearProfile();
+    setProfile({ name: "", email: "", welcomeSeen: false });
+    setNameDraft("");
+    setEmailDraft("");
+    setAuthMessage(null);
+    setWelcomeError(null);
+    setUserEmail(null);
+    if (supabaseReady) {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    }
+    setView("welcome");
   }
 
   function addCommitment(event: FormEvent) {
@@ -244,34 +305,34 @@ export function HoldApp() {
   async function signIn(event: FormEvent) {
     event.preventDefault();
     const name = nameDraft.trim();
+    const email = emailDraft.trim();
     if (!name) {
-      setAuthMessage("Add your name first.");
+      setAuthMessage("Name is required.");
       return;
     }
-    setProfile((prev) => ({ ...prev, name, welcomeSeen: true }));
+    setProfile((prev) => ({ ...prev, name, email, welcomeSeen: true }));
+    saveProfile({ name, email, welcomeSeen: true });
+
+    if (!email) {
+      setAuthMessage("Add an email if you want a sign-in link.");
+      return;
+    }
 
     if (!supabaseReady) {
-      setAuthMessage("Sign-in needs Supabase keys in .env.local. Your name is saved on this device.");
+      setAuthMessage("Sign-in needs Supabase keys in .env.local. Your name is saved in a cookie.");
       return;
     }
 
     setAuthMessage("Sending a sign-in link…");
     const supabase = createClient();
     const { error: authError } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
+      email,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback`,
         data: { name },
       },
     });
     setAuthMessage(authError ? authError.message : "Check your email for a sign-in link.");
-  }
-
-  async function signOut() {
-    if (!supabaseReady) return;
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    setUserEmail(null);
   }
 
   async function enableAnnoyingExtras() {
@@ -295,23 +356,39 @@ export function HoldApp() {
     return (
       <div className="welcome">
         <p className="brand">Hold</p>
-        <h1 className="lede">What should we call you?</h1>
-        <p className="sub">Optional — Hold can greet you by name when it checks in.</p>
-        <form className="welcome-form" onSubmit={finishWelcome}>
-          <input
-            value={nameDraft}
-            onChange={(event) => setNameDraft(event.target.value)}
-            placeholder="Your name"
-            maxLength={40}
-            autoFocus
-          />
+        <h1 className="lede">Who’s holding today?</h1>
+        <p className="sub">Name is required. Email is optional if you want a sign-in link.</p>
+        <form className="welcome-form" onSubmit={(event) => void finishWelcome(event)}>
+          <label className="field">
+            <span>Name</span>
+            <input
+              value={nameDraft}
+              onChange={(event) => {
+                setNameDraft(event.target.value);
+                if (welcomeError) setWelcomeError(null);
+              }}
+              placeholder="Your name"
+              maxLength={40}
+              required
+              autoFocus
+            />
+          </label>
+          <label className="field">
+            <span>Email</span>
+            <input
+              type="email"
+              value={emailDraft}
+              onChange={(event) => setEmailDraft(event.target.value)}
+              placeholder="Optional"
+              maxLength={120}
+            />
+            <p className="field-hint">Leave blank to continue without an account.</p>
+          </label>
+          {welcomeError ? <p className="error">{welcomeError}</p> : null}
           <button type="submit" className="primary">
             Continue
           </button>
         </form>
-        <button type="button" className="text-link" onClick={() => finishWelcome()}>
-          Skip for now
-        </button>
       </div>
     );
   }
@@ -458,9 +535,22 @@ export function HoldApp() {
             <input
               value={nameDraft}
               onChange={(event) => setNameDraft(event.target.value)}
-              onBlur={() => setProfile((prev) => ({ ...prev, name: nameDraft.trim() }))}
+              onBlur={() => {
+                const name = nameDraft.trim();
+                if (!name) {
+                  setAuthMessage("Name is required.");
+                  setNameDraft(profile.name);
+                  return;
+                }
+                setProfile((prev) => {
+                  const next = { ...prev, name, welcomeSeen: true };
+                  saveProfile(next);
+                  return next;
+                });
+              }}
               placeholder="Your name"
               maxLength={40}
+              required
             />
           </label>
 
@@ -520,34 +610,30 @@ export function HoldApp() {
           </div>
 
           <div className="account-block">
-            <p className="eyebrow">Sign in</p>
-            <p className="empty">Optional. Use your name and email when you want an account.</p>
+            <p className="eyebrow">Account</p>
+            <p className="empty">Email is optional. Add it only if you want a sign-in link.</p>
             {userEmail ? (
               <div className="signed-in">
                 <p className="empty">Signed in as {userEmail}</p>
-                <button type="button" className="ghost-btn" onClick={() => void signOut()}>
-                  Sign out
-                </button>
               </div>
             ) : (
-              <form className="stack-form" onSubmit={signIn}>
+              <form className="stack-form" onSubmit={(event) => void signIn(event)}>
                 <input
                   type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="Email"
-                  required
+                  value={emailDraft}
+                  onChange={(event) => setEmailDraft(event.target.value)}
+                  placeholder="Email (optional)"
                 />
                 <button type="submit" className="primary">
-                  Email me a sign-in link
+                  {emailDraft.trim() ? "Email me a sign-in link" : "Save account details"}
                 </button>
               </form>
             )}
             {authMessage ? <p className="empty">{authMessage}</p> : null}
           </div>
 
-          <button type="button" className="text-link" onClick={() => setView("welcome")}>
-            Show welcome screen again
+          <button type="button" className="text-link" onClick={() => void logout()}>
+            Logout
           </button>
         </section>
       ) : null}
