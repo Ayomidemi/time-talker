@@ -1,40 +1,59 @@
-# Time Talker
+# Hold
 
-A clock that speaks the time on a schedule you choose: every half hour, or every quarter hour. It uses the Mac `say` command, so announcements keep going after you close the browser tab. They stop when you quit the terminal.
+Keep what you said you would do.
 
-## Run
+Hold is a web/PWA accountability clock. It speaks the time on a half-hour or quarter-hour cadence, then asks you to check in: **On track**, **Slacking**, or **Break**. Gentle mode nudges lightly. Annoying mode keeps after you until you answer.
 
-Requires Node.js on macOS.
+## Stack
+
+- Next.js + TypeScript
+- Web Speech API (works in the browser)
+- Browser notifications for background nudges
+- Supabase for auth + optional sync
+- Deploy on Vercel
+
+## Run locally
 
 ```bash
-npm start
+npm install
+cp .env.example .env.local
+npm run dev
 ```
 
-That starts the app at [http://127.0.0.1:4173](http://127.0.0.1:4173) and opens it in your browser. Stop it with Ctrl+C.
+Open [http://localhost:3000](http://localhost:3000).
 
-If port 4173 is already in use:
+Without Supabase keys, Hold runs in **local mode** (settings, commitments, and check-ins stay in your browser).
 
-```bash
-PORT=4174 npm start
-```
+## Supabase setup
 
-## What it says
+1. Create a project at [supabase.com](https://supabase.com).
+2. Put the project URL and anon key in `.env.local`.
+3. Run `supabase/schema.sql` in the Supabase SQL editor.
+4. Under Authentication → URL configuration, add:
+   - Site URL: `http://localhost:3000` (and your Vercel URL later)
+   - Redirect URL: `http://localhost:3000/auth/callback`
 
-The time is read exactly, with the part of the day when that option is on.
+Magic-link sign-in is ready after that.
 
-| Time   | Spoken                                      |
-| ------ | ------------------------------------------- |
-| 11:30  | It's eleven thirty in the morning.          |
-| 12:00  | It's twelve o'clock in the afternoon.       |
-| 12:04  | It's twelve oh four in the afternoon.       |
-| 9:00   | It's nine o'clock at night.                 |
+## Deploy on Vercel
 
-## Controls
+1. Push this repo to GitHub.
+2. Import the project in Vercel.
+3. Framework preset: **Next.js**.
+4. Add the same `NEXT_PUBLIC_SUPABASE_*` env vars.
+5. Deploy.
 
-- **Chime** turns announcements on or off.
-- **How often** chooses every half hour (:00 and :30) or every quarter hour (:00, :15, :30, and :45).
-- **Voice** picks a macOS speaking voice.
-- **Say the time of day** adds “in the morning,” “in the afternoon,” “in the evening,” or “at night.”
-- **Say the time now** speaks the current minute immediately.
+## What v1 includes
 
-Your choices are saved in `data/settings.json`.
+- Half-hour or quarter-hour spoken cadence
+- Gentle vs annoying intensity
+- Today’s commitments (up to 3)
+- Check-in logging + recent honesty list
+- PWA manifest for “Add to Home Screen”
+- Supabase magic-link auth shell
+
+## What’s next
+
+- Sync commitments/check-ins to Supabase when signed in
+- Web Push so annoying mode works after the tab is closed
+- End-of-day spoken review

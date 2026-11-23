@@ -1,7 +1,7 @@
 {
   "enabled": true,
-  "voice": "Daniel",
+  "voice": "Samantha (English (US))",
   "includePeriod": true,
-  "interval": "quarter",
+  "interval": "half",
   "rate": 175
 }
