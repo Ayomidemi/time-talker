@@ -13,6 +13,7 @@ function setup({ configured = true, data = null, error = null } = {}) {
   const calls = [];
   const exports = {};
   const modules = {
+    "@/lib/supabase/env": { holdSupabaseUrl: () => "https://example.supabase.co", holdSupabaseAnonKey: () => "test-key" },
     "@supabase/supabase-js": {
       createClient: () => ({ rpc: async (...args) => {
         calls.push(args);

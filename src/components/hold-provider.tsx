@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createContext, useContext } from "react";
 import { logoutAccount, saveAccountChanges } from "@/lib/account-client";
+import { accountPreferences } from "@/lib/preferences";
 import { accountCommitments, type CommitmentChange } from "@/lib/commitments-client";
 import { broadcastLogout, clearBrowserData, LOGOUT_CHANNEL } from "@/lib/logout";
 import { checkInPrompt, spokenCheckInPrompt } from "@/lib/prompts";
@@ -57,6 +58,9 @@ function nudgeGapMs(intensity: Settings["intensity"], cadence: Cadence) {
 type HoldContextValue = {
   now: Date | null;
   settings: Settings;
+  settingsBusy: boolean;
+  settingsError: string | null;
+  retrySettings: () => void;
   profile: Profile;
   commitments: Commitment[];
   commitmentsLoading: boolean;
@@ -122,8 +126,18 @@ export function HoldProvider({ children }: { children: React.ReactNode }) {
 
 function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; hydrated: boolean }) {
   const [now, setNow] = useState<Date | null>(() => hydrated ? new Date() : null);
-  const [settings, setSettings] = useState<Settings>(() => hydrated ? loadSettings() : DEFAULT_SETTINGS);
   const [profile, setProfile] = useState<Profile>(() => hydrated ? loadProfile() : { name: "", email: "", welcomeSeen: false, emailPending: false });
+  const [settingsView, setSettingsView] = useState<{ email: string; value: Settings; ready: boolean; saving: boolean; error: string | null }>(() => ({
+    email: profile.email, value: hydrated && !profile.email ? loadSettings() : DEFAULT_SETTINGS,
+    ready: hydrated && !profile.email, saving: false, error: null,
+  }));
+  const [settingsReload, setSettingsReload] = useState(0);
+  const settingsRequestRef = useRef<AbortController | null>(null);
+  const settingsMutationRef = useRef(false);
+  const settingsReady = settingsView.email === profile.email && settingsView.ready;
+  const settingsBusy = !settingsReady || settingsView.saving;
+  const settingsError = settingsView.email === profile.email ? settingsView.error : null;
+  const settings = settingsView.email === profile.email ? settingsView.value : DEFAULT_SETTINGS;
   const [commitmentDay, setCommitmentDay] = useState(() => hydrated ? todayKey() : "");
   const commitmentScope = `${profile.email}|${commitmentDay}`;
   const [commitmentView, setCommitmentView] = useState<{ scope: string; items: Commitment[]; ready: boolean; saving: boolean; error: string | null }>(() => ({
@@ -159,8 +173,29 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
   const lastNudgeRef = useRef(0);
 
   useEffect(() => {
-    if (hydrated && !loggingOutRef.current) saveSettings(settings);
-  }, [settings, hydrated]);
+    if (!hydrated) return;
+    const controller = new AbortController();
+    settingsRequestRef.current = controller;
+    settingsMutationRef.current = false;
+    Promise.resolve().then(async () => {
+      const value = profile.email ? await accountPreferences(controller.signal) : loadSettings();
+      if (!controller.signal.aborted && !loggingOutRef.current) {
+        setSettingsView({ email: profile.email, value, ready: true, saving: false, error: null });
+      }
+    }).catch((err) => {
+      if (!controller.signal.aborted && !loggingOutRef.current) setSettingsView((prev) => ({
+        ...prev, email: profile.email, ready: false, saving: false,
+        error: err instanceof Error ? err.message : "Couldn’t load preferences.",
+      }));
+    });
+    return () => controller.abort();
+  }, [hydrated, profile.email, settingsReload]);
+
+  function retrySettings() {
+    if (loggingOutRef.current || settingsMutationRef.current) return;
+    setSettingsView((prev) => ({ ...prev, ready: false, error: null }));
+    setSettingsReload((value) => value + 1);
+  }
 
   useEffect(() => {
     if (!hydrated) return;
@@ -195,7 +230,7 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     if (hydrated && !loggingOutRef.current) saveProfile(profile);
   }, [profile, hydrated]);
 
-  const cadence: Cadence = settings.enabled ? settings.cadence : "off";
+  const cadence: Cadence = settingsReady && settings.enabled ? settings.cadence : "off";
   const next = useMemo(
     () => (now ? nextAnnouncement(now, cadence === "off" ? "half" : cadence) : null),
     [now, cadence],
@@ -249,7 +284,7 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     if (day !== commitmentDay) {
       setCommitmentDay(day);
     }
-    if (!settings.enabled || settings.cadence === "off") return;
+    if (!settingsReady || !settings.enabled || settings.cadence === "off") return;
     const boundary = lastBoundary(current, settings.cadence);
     if (boundary) {
       const late = current.getTime() - boundary.getTime();
@@ -282,14 +317,29 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     };
   }, [hydrated]);
 
-  function updateSettings(partial: Partial<Settings>) {
-    if (loggingOutRef.current) return;
-    setSettings((prev) => ({ ...prev, ...partial }));
+  async function updateSettings(partial: Partial<Settings>) {
+    const controller = settingsRequestRef.current;
+    if (loggingOutRef.current || !settingsReady || !controller || controller.signal.aborted || settingsMutationRef.current) return;
+    settingsMutationRef.current = true;
+    setSettingsView((prev) => ({ ...prev, saving: true, error: null }));
+    try {
+      const value = profile.email ? await accountPreferences(controller.signal, partial) : { ...settings, ...partial };
+      if (controller.signal.aborted || loggingOutRef.current) return;
+      if (!profile.email) saveSettings(value);
+      setSettingsView({ email: profile.email, value, ready: true, saving: false, error: null });
+    } catch (err) {
+      if (!controller.signal.aborted && !loggingOutRef.current) setSettingsView((prev) => ({
+        ...prev, saving: false, error: err instanceof Error ? err.message : "Couldn’t save preferences.",
+      }));
+    } finally {
+      if (!controller.signal.aborted) settingsMutationRef.current = false;
+    }
   }
 
   async function logout(broadcast = true) {
     if (loggingOutRef.current) return;
     loggingOutRef.current = true;
+    settingsRequestRef.current?.abort();
     commitmentsRequestRef.current?.abort();
     nameRequestRef.current?.abort();
     setLoggingOut(true);
@@ -431,7 +481,7 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
   }
 
   const untilLabel =
-    !settings.enabled || settings.cadence === "off"
+    !settingsReady ? "Loading preferences…" : !settings.enabled || settings.cadence === "off"
       ? "Cadence is off"
       : next && now
         ? `${formatWait(next.getTime() - now.getTime())} to ${formatWhen(next)}`
@@ -443,6 +493,9 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
   const value: HoldContextValue = {
     now,
     settings,
+    settingsBusy,
+    settingsError,
+    retrySettings,
     profile,
     commitments,
     commitmentsLoading,

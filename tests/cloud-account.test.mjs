@@ -13,7 +13,9 @@ function compile(path, modules) {
   vm.runInNewContext(code, { exports, URL, process: { env: {} }, require: (name) => modules[name] ?? require(name) });
   return exports;
 }
+const preferenceHelpers = compile("../src/lib/preferences.ts", {});
 const helper = compile("../src/lib/email-account-server.ts", {
+  "@/lib/supabase/env": { holdSupabaseUrl: () => "https://example.supabase.co", holdSupabaseAnonKey: () => "test-key" },
   "next/headers": {}, "./cookies": { EMAIL_COOKIE: "hold_email" },
 });
 function routes({ data = [], error = null, guest = false } = {}) {
@@ -27,6 +29,7 @@ function routes({ data = [], error = null, guest = false } = {}) {
   };
   return {
     calls,
+    preferences: compile("../src/app/api/account/preferences/route.ts", { "@/lib/email-account-server": mock, "@/lib/preferences": preferenceHelpers }),
     commitments: compile("../src/app/api/commitments/route.ts", { "@/lib/email-account-server": mock }),
     name: compile("../src/app/api/account/name/route.ts", { "@/lib/email-account-server": mock }),
   };
@@ -95,4 +98,33 @@ test("deadline is optional and timezone offsets become a single UTC instant", as
     assert.equal(response.status, 200);
     assert.equal(calls[0].args.item_due_at, dueAt ? "2026-11-24T09:30:00.000Z" : null);
   }
+});
+
+
+test("preferences load from the cookie profile without caching", async () => {
+  const settings = { cadence: "quarter", intensity: "annoying", includePeriod: false, enabled: false };
+  const { preferences, calls } = routes({ data: settings });
+  const response = await preferences.GET();
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual((await response.json()).settings, settings);
+  assert.equal(calls[0].args.target_email, "ada@example.com");
+  assert.deepEqual(Object.keys(calls[0].args.changes), []);
+});
+
+test("preferences save only changed fields and reject invalid payloads", async () => {
+  const { preferences, calls } = routes({ data: {} });
+  assert.equal((await preferences.PATCH(request({ enabled: false }))).status, 200);
+  assert.equal(calls[0].args.changes.enabled, false);
+  assert.deepEqual(Object.keys(calls[0].args.changes), ["enabled"]);
+  for (const body of [null, [], {}, { cadence: "minute" }, { intensity: null }, { enabled: "false" }, { email: "other@example.com" }]) {
+    assert.equal((await preferences.PATCH(request(body))).status, 400);
+  }
+  assert.equal(calls.length, 1);
+});
+
+test("guest preference requests are rejected and storage errors remain visible", async () => {
+  assert.equal((await routes({ guest: true }).preferences.GET()).status, 401);
+  const response = await routes({ error: { code: "PGRST202", message: "Missing migration" } }).preferences.GET();
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /migration/);
 });

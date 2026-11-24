@@ -28,7 +28,7 @@ Without Supabase keys, Hold runs in **local mode** (settings, commitments, and c
 
 Start with an optional email. Skip it to enter a name and use Hold locally. An existing email opens Hold with its saved name; a new email asks for a name and creates a profile. No email verification is sent.
 
-Email profiles are intentionally unverified, so anyone with an email can retrieve its saved name. They do not create a Supabase Auth session or grant access to private authenticated data. Settings and check-ins remain in this browser. Guest commitments stay local; email profiles save commitments in Supabase by email and day. With the chosen email-only entry, anyone who enters an email can access that profile and its commitments.
+Email profiles are intentionally unverified, so anyone with an email can retrieve its saved name. They do not create a Supabase Auth session or grant access to private authenticated data. Signed-in preferences are stored in Supabase per email. Guest preferences and all check-ins remain in this browser. Guest commitments stay local; email profiles save commitments in Supabase by email and day. With the chosen email-only entry, anyone who enters an email can access that profile and its commitments.
 
 1. Create a project at [supabase.com](https://supabase.com).
 2. Put the project URL and anon key in `.env.local` as `NEXT_HOLD_SUPABASE_URL` and `NEXT_HOLD_SUPABASE_ANON_KEY` (never put the database password in these vars).
@@ -48,6 +48,8 @@ On **You**, name and email edits use a single **Save account details** button. N
 Logout clears browser data and stops timers; Supabase profile names and commitments remain available when signing in again.
 
 For unlimited commitments and optional deadlines, also run `supabase/migrations/20261123_commitment_deadlines.sql` after the profile commitments migration. Deadlines use your browser’s local date/time and are stored as UTC instants. Deadlines are displayed with each commitment; they do not schedule additional notifications.
+
+To enable cloud preferences, run `supabase/migrations/20261124_preferences.sql` in Supabase SQL Editor. Changes to cadence, intensity, time-of-day wording, and the enabled switch save automatically. Preferences load on sign-in, survive logout, and never overwrite another email’s preferences. Only changed fields are sent. Browser notification permission remains device-specific.
 
 ## Checks
 

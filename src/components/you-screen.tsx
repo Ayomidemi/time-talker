@@ -46,6 +46,12 @@ export function YouScreen() {
       </form>
       {hold.authMessage ? <p className="empty">{hold.authMessage}</p> : null}
 
+      {hold.settingsError ? (
+        <div role="alert">
+          <p className="error">{hold.settingsError}</p>
+          <button type="button" className="text-link" onClick={hold.retrySettings}>Reload preferences</button>
+        </div>
+      ) : hold.settingsBusy ? <p className="empty" role="status">Loading or saving preferences…</p> : null}
       <div className="stack">
         <div className="row">
           <div>
@@ -55,6 +61,7 @@ export function YouScreen() {
           <button
             type="button"
             className="switch"
+            disabled={hold.settingsBusy}
             role="switch"
             aria-checked={hold.settings.enabled}
             aria-label="Spoken cadence"
@@ -67,6 +74,7 @@ export function YouScreen() {
         <label className="field">
           <span>How often</span>
           <select
+            disabled={hold.settingsBusy}
             value={hold.settings.cadence}
             onChange={(event) => hold.updateSettings({ cadence: event.target.value as Cadence })}
           >
@@ -79,6 +87,7 @@ export function YouScreen() {
         <label className="field">
           <span>Intensity</span>
           <select
+            disabled={hold.settingsBusy}
             value={hold.settings.intensity}
             onChange={(event) => {
               const value = event.target.value as Intensity;
@@ -94,6 +103,7 @@ export function YouScreen() {
         <label className="check-line">
           <input
             type="checkbox"
+            disabled={hold.settingsBusy}
             checked={hold.settings.includePeriod}
             onChange={(event) => hold.updateSettings({ includePeriod: event.target.checked })}
           />
