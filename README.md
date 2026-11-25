@@ -43,13 +43,15 @@ To apply the migration in the Supabase dashboard:
 
 For display-name editing and cloud commitments, also run `supabase/migrations/20261123_profile_commitments.sql` in a new SQL Editor query after the email accounts migration. New installations using `schema.sql` already include both.
 
-On **You**, name and email edits use a single **Save account details** button. Name-only edits update the existing profile; adding an email creates or opens that email profile. Guests can add an email to create or open a profile. Signed-in users load today's commitments from Supabase, and additions, completion changes, and removals save there. Existing guest/browser-only commitments are not automatically copied to an email profile.
+On **You**, name and email edits use a single **Save account details** button. Name-only edits update the existing profile; adding an email creates or opens that email profile. Guests can add an email to create or open a profile. Signed-in users load all saved commitments from Supabase, and additions, completion changes, and removals save there. Existing guest/browser-only commitments are not automatically copied to an email profile.
 
 Logout clears browser data and stops timers; Supabase profile names and commitments remain available when signing in again.
 
 For unlimited commitments and optional deadlines, also run `supabase/migrations/20261123_commitment_deadlines.sql` after the profile commitments migration. Deadlines use your browser’s local date/time and are stored as UTC instants. Deadlines are displayed with each commitment; they do not schedule additional notifications.
 
 To enable cloud preferences, run `supabase/migrations/20261124_preferences.sql` in Supabase SQL Editor. Changes to cadence, intensity, time-of-day wording, and the enabled switch save automatically. Preferences load on sign-in, survive logout, and never overwrite another email’s preferences. Only changed fields are sent. Browser notification permission remains device-specific.
+
+Run `supabase/migrations/20261125_commitment_history.sql` after the deadlines migration to show commitments across days. Unfinished items remain on the main list; completed items are available under **Completed commitments** and can be reopened. The upgrade preserves every existing row and its original date. Guest commitments follow the same display behavior.
 
 ## Checks
 

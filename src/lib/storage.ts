@@ -1,6 +1,5 @@
 import { clearCookie, EMAIL_COOKIE, NAME_COOKIE, PENDING_COOKIE, readCookie, writeCookie } from "./cookies";
 import { DEFAULT_SETTINGS, type CheckIn, type Commitment, type Settings } from "./types";
-import { todayKey } from "./time";
 
 const SETTINGS_KEY = "hold.settings";
 const COMMITMENTS_KEY = "hold.commitments";
@@ -38,9 +37,13 @@ export function saveSettings(settings: Settings) {
   writeJson(SETTINGS_KEY, settings);
 }
 
-export function loadCommitments(day = todayKey()): Commitment[] {
+export function loadCommitments(day?: string): Commitment[] {
   const all = readJson<Commitment[]>(COMMITMENTS_KEY, []);
-  return all.filter((item) => item.day === day);
+  return day ? all.filter((item) => item.day === day) : all;
+}
+
+export function saveCommitments(items: Commitment[]) {
+  writeJson(COMMITMENTS_KEY, items);
 }
 
 export function saveCommitmentsForDay(day: string, items: Commitment[]) {

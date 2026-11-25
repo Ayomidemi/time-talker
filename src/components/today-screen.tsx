@@ -1,11 +1,35 @@
 "use client";
 
 import { statusLabel } from "@/lib/prompts";
+import type { Commitment } from "@/lib/types";
 import { useHold } from "@/components/hold-provider";
 
 export function TodayScreen() {
   const hold = useHold();
   if (!hold.hydrated) return <div className="boot">Hold</div>;
+
+  const completed = hold.commitments.filter((item) => item.done);
+  function renderCommitments(items: Commitment[]) {
+    return (
+      <ul className="commitment-list">
+        {items.map((item) => (
+          <li key={item.id} className={item.done ? "done" : ""}>
+            <button type="button" className="check" disabled={hold.commitmentsLoading || hold.commitmentsSaving} onClick={() => hold.toggleDone(item.id)} aria-label="Toggle done">
+              <span />
+            </button>
+            <div className="title">
+              <span>{item.title}</span>
+              <small className="commitment-deadline">Added {item.day}</small>
+              {item.dueAt ? <small className="commitment-deadline">Due {new Date(item.dueAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</small> : null}
+            </div>
+            <button type="button" className="ghost" disabled={hold.commitmentsLoading || hold.commitmentsSaving} onClick={() => hold.removeCommitment(item.id)}>
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  }
 
   return (
     <section className="screen" aria-label="Today">
@@ -22,24 +46,15 @@ export function TodayScreen() {
           <button type="button" className="text-link" disabled={hold.commitmentsSaving} onClick={hold.retryCommitments}>Reload commitments</button>
         </div>
       ) : null}
-      <ul className="commitment-list">
-        {hold.commitments.map((item) => (
-          <li key={item.id} className={item.done ? "done" : ""}>
-            <button type="button" className="check" disabled={hold.commitmentsLoading || hold.commitmentsSaving} onClick={() => hold.toggleDone(item.id)} aria-label="Toggle done">
-              <span />
-            </button>
-            <div className="title">
-              <span>{item.title}</span>
-              {item.dueAt ? <small className="commitment-deadline">Due {new Date(item.dueAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</small> : null}
-            </div>
-            <button type="button" className="ghost" disabled={hold.commitmentsLoading || hold.commitmentsSaving} onClick={() => hold.removeCommitment(item.id)}>
-              Remove
-            </button>
-          </li>
-        ))}
-      </ul>
+      {renderCommitments(hold.openCommitments)}
+      {completed.length ? (
+        <details className="history-block">
+          <summary>Completed commitments ({completed.length})</summary>
+          {renderCommitments(completed)}
+        </details>
+      ) : null}
 
-      {!hold.commitmentsLoading && !hold.commitmentsError && hold.commitments.length === 0 ? <p className="empty">No commitments yet. Add an outcome below.</p> : null}
+      {!hold.commitmentsLoading && !hold.commitmentsError && hold.openCommitments.length === 0 ? <p className="empty">No unfinished commitments. Add an outcome below.</p> : null}
 
         <form className="stack-form" onSubmit={(event) => void hold.addCommitment(event)}>
           <input

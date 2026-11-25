@@ -15,7 +15,7 @@ import {
   loadProfile,
   loadSettings,
   newId,
-  saveCommitmentsForDay,
+  saveCommitments,
   saveProfile,
   saveSettings,
   type Profile,
@@ -205,7 +205,7 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     Promise.resolve().then(async () => {
       const items = profile.email
         ? await accountCommitments(commitmentDay, controller.signal)
-        : loadCommitments(commitmentDay);
+        : loadCommitments();
       if (!controller.signal.aborted && !loggingOutRef.current) {
         setCommitmentView({ scope: commitmentScope, items, ready: true, saving: false, error: null });
       }
@@ -392,7 +392,7 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
         } else {
           items = items.filter((item) => item.id !== change.id);
         }
-        saveCommitmentsForDay(commitmentDay, items);
+        saveCommitments(items);
       }
       if (controller.signal.aborted || loggingOutRef.current) return false;
       setCommitmentView({ scope: commitmentScope, items, ready: true, saving: false, error: null });
