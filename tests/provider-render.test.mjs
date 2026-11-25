@@ -13,6 +13,7 @@ test("server rendering reaches route children without reading browser data", () 
   const exports = {};
   const browserOnly = () => { throw new Error("Browser data accessed during server rendering"); };
   const mocks = {
+    "@/lib/announcement-schedule": { AnnouncementSchedule: class {} },
     "next/navigation": { useRouter: () => ({}) },
     "@/lib/storage": { loadProfile: browserOnly, loadSettings: browserOnly, loadCommitments: browserOnly, loadCheckIns: browserOnly },
     "@/lib/time": { todayKey: browserOnly },

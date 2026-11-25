@@ -21,7 +21,10 @@ export function speak(text: string) {
 
   return new Promise<void>((resolve, reject) => {
     utterance.onend = () => resolve();
-    utterance.onerror = () => reject(new Error("Speech was interrupted."));
+    utterance.onerror = (event) => reject(new Error(event.error === "not-allowed"
+      ? "Your browser blocked speech. Tap Say the time to enable it."
+      : `Couldn’t speak (${event.error}). Try Say the time.`));
+    if (window.speechSynthesis.paused) window.speechSynthesis.resume();
     window.speechSynthesis.speak(utterance);
   });
 }

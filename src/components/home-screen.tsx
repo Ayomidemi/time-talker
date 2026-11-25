@@ -46,6 +46,7 @@ export function HomeScreen() {
             ? "How are you holding?"
             : hold.lastPhrase || hold.openCommitments[0]?.title || "Add what you’re holding today."}
         </p>
+        {hold.settingsError ? <p className="error">{hold.settingsError} <button type="button" className="text-link" onClick={hold.retrySettings}>Reload preferences</button></p> : null}
         {hold.error ? <p className="error">{hold.error}</p> : null}
 
         <div className={`checkin-row ${hold.awaitingCheckIn ? "urgent" : ""}`} aria-label="Check in">

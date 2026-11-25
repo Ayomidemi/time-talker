@@ -1,4 +1,5 @@
 import { clearCookie, EMAIL_COOKIE, NAME_COOKIE, PENDING_COOKIE, readCookie, writeCookie } from "./cookies";
+import { validPreferences } from "./preferences";
 import { DEFAULT_SETTINGS, type CheckIn, type Commitment, type Settings } from "./types";
 
 const SETTINGS_KEY = "hold.settings";
@@ -96,4 +97,13 @@ export function clearProfile() {
   clearCookie(NAME_COOKIE);
   clearCookie(EMAIL_COOKIE);
   clearCookie(PENDING_COOKIE);
+}
+
+export function loadAccountSettings(email: string): Settings | null {
+  const value = readJson<unknown>(`hold.settings.${email.trim().toLowerCase()}`, null);
+  return validPreferences(value) && Object.keys(value).length === 4 ? value as Settings : null;
+}
+
+export function saveAccountSettings(email: string, settings: Settings) {
+  try { writeJson(`hold.settings.${email.trim().toLowerCase()}`, settings); } catch { /* Cloud preferences still remain saved. */ }
 }

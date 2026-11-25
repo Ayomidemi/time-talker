@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createContext, useContext } from "react";
 import { logoutAccount, saveAccountChanges } from "@/lib/account-client";
+import { AnnouncementSchedule } from "@/lib/announcement-schedule";
 import { accountPreferences } from "@/lib/preferences";
 import { accountCommitments, type CommitmentChange } from "@/lib/commitments-client";
 import { broadcastLogout, clearBrowserData, LOGOUT_CHANNEL } from "@/lib/logout";
@@ -14,6 +15,8 @@ import {
   loadCommitments,
   loadProfile,
   loadSettings,
+  loadAccountSettings,
+  saveAccountSettings,
   newId,
   saveCommitments,
   saveProfile,
@@ -127,9 +130,10 @@ export function HoldProvider({ children }: { children: React.ReactNode }) {
 function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; hydrated: boolean }) {
   const [now, setNow] = useState<Date | null>(() => hydrated ? new Date() : null);
   const [profile, setProfile] = useState<Profile>(() => hydrated ? loadProfile() : { name: "", email: "", welcomeSeen: false, emailPending: false });
+  const [initialAccountSettings] = useState(() => hydrated && profile.email ? loadAccountSettings(profile.email) : null);
   const [settingsView, setSettingsView] = useState<{ email: string; value: Settings; ready: boolean; saving: boolean; error: string | null }>(() => ({
-    email: profile.email, value: hydrated && !profile.email ? loadSettings() : DEFAULT_SETTINGS,
-    ready: hydrated && !profile.email, saving: false, error: null,
+    email: profile.email, value: hydrated && !profile.email ? loadSettings() : initialAccountSettings ?? DEFAULT_SETTINGS,
+    ready: hydrated && (!profile.email || Boolean(initialAccountSettings)), saving: false, error: null,
   }));
   const [settingsReload, setSettingsReload] = useState(0);
   const settingsRequestRef = useRef<AbortController | null>(null);
@@ -170,6 +174,8 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
   const loggingOutRef = useRef(false);
   const clockTimerRef = useRef<number | null>(null);
   const announcedRef = useRef("");
+  const [announcementSchedule] = useState(() => new AnnouncementSchedule());
+  const speechInFlightRef = useRef(false);
   const lastNudgeRef = useRef(0);
 
   useEffect(() => {
@@ -180,11 +186,12 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     Promise.resolve().then(async () => {
       const value = profile.email ? await accountPreferences(controller.signal) : loadSettings();
       if (!controller.signal.aborted && !loggingOutRef.current) {
+        if (profile.email) saveAccountSettings(profile.email, value);
         setSettingsView({ email: profile.email, value, ready: true, saving: false, error: null });
       }
     }).catch((err) => {
       if (!controller.signal.aborted && !loggingOutRef.current) setSettingsView((prev) => ({
-        ...prev, email: profile.email, ready: false, saving: false,
+        ...prev, email: profile.email, ready: prev.email === profile.email && prev.ready, saving: false,
         error: err instanceof Error ? err.message : "Couldn’t load preferences.",
       }));
     });
@@ -193,7 +200,7 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
 
   function retrySettings() {
     if (loggingOutRef.current || settingsMutationRef.current) return;
-    setSettingsView((prev) => ({ ...prev, ready: false, error: null }));
+    setSettingsView((prev) => ({ ...prev, error: null }));
     setSettingsReload((value) => value + 1);
   }
 
@@ -242,29 +249,33 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
   const greetingName = profile.name.trim();
 
   async function announce(text: string) {
-    if (loggingOutRef.current) return;
+    if (loggingOutRef.current || speechInFlightRef.current) return false;
+    speechInFlightRef.current = true;
     setSpeaking(true);
     setLastPhrase(text);
     setError(null);
     try {
       await speak(text);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn’t speak just now.");
+      return false;
     } finally {
+      speechInFlightRef.current = false;
       setSpeaking(false);
     }
   }
 
   async function fireSlot(slotDate: Date) {
     const key = slotKey(slotDate);
-    if (announcedRef.current === key) return;
     announcedRef.current = key;
     setPendingSlot(key);
     lastNudgeRef.current = Date.now();
-    const timeLine = phraseFor(slotDate, { includePeriod: settings.includePeriod });
+    const timeLine = phraseFor(new Date(), { includePeriod: settings.includePeriod });
     const text = greetingName ? `${greetingName}. ${timeLine}` : timeLine;
     notify("Hold", checkInPrompt(commitments, settings.intensity));
-    await announce(text);
+    const succeeded = await announce(text);
+    announcementSchedule.settled(slotDate, succeeded, Date.now());
   }
 
   function beginPendingSlot(boundary: Date) {
@@ -284,18 +295,16 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
     if (day !== commitmentDay) {
       setCommitmentDay(day);
     }
-    if (!settingsReady || !settings.enabled || settings.cadence === "off") return;
-    const boundary = lastBoundary(current, settings.cadence);
-    if (boundary) {
-      const late = current.getTime() - boundary.getTime();
-      const intervalMs = intervalMinutes(settings.cadence) * 60_000;
-      if (late >= 0 && late < SLOT_ANNOUNCE_WINDOW_MS) {
-        void fireSlot(boundary);
-      } else if (late >= SLOT_ANNOUNCE_WINDOW_MS && late < intervalMs) {
-        // Arrived mid-interval: still open the check-in window without replaying the time.
-        beginPendingSlot(boundary);
-      }
+    const activeCadence = settingsReady && settings.enabled ? settings.cadence : "off";
+    const due = announcementSchedule.due(current, activeCadence);
+    if (activeCadence === "off") return;
+    if (due) {
+      void fireSlot(due);
+      return;
     }
+    if (speechInFlightRef.current) return;
+    const boundary = lastBoundary(current, activeCadence);
+    if (boundary && current.getTime() - boundary.getTime() >= SLOT_ANNOUNCE_WINDOW_MS) beginPendingSlot(boundary);
     if (!pendingSlot) return;
     const gap = nudgeGapMs(settings.intensity, settings.cadence);
     if (Date.now() - lastNudgeRef.current < gap) return;
@@ -309,9 +318,14 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
   useEffect(() => {
     if (!hydrated) return;
     const id = window.setInterval(() => onClockTick(), 250);
+    const onResume = () => { if (document.visibilityState === "visible") onClockTick(); };
+    window.addEventListener("focus", onResume);
+    document.addEventListener("visibilitychange", onResume);
     clockTimerRef.current = id;
     return () => {
       window.clearInterval(id);
+      window.removeEventListener("focus", onResume);
+      document.removeEventListener("visibilitychange", onResume);
       clockTimerRef.current = null;
       stopSpeech();
     };
@@ -326,6 +340,7 @@ function LocalHoldProvider({ children, hydrated }: { children: React.ReactNode; 
       const value = profile.email ? await accountPreferences(controller.signal, partial) : { ...settings, ...partial };
       if (controller.signal.aborted || loggingOutRef.current) return;
       if (!profile.email) saveSettings(value);
+      else saveAccountSettings(profile.email, value);
       setSettingsView({ email: profile.email, value, ready: true, saving: false, error: null });
     } catch (err) {
       if (!controller.signal.aborted && !loggingOutRef.current) setSettingsView((prev) => ({
